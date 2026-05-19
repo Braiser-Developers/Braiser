@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Braiser</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <h1>Braiser</h1>
+        <span id="tabCount" class="tab-count">0</span>
+      </header>
+
+      <section class="actions" aria-label="标签页操作">
+        <button id="newTabButton" type="button">新建课程网标签</button>
+        <button id="closeRightmostButton" type="button">关闭最右侧标签</button>
+      </section>
+
+      <ul id="tabList" class="tab-list" aria-label="当前所有标签页"></ul>
+      <p id="emptyState" class="empty-state" hidden>暂无可显示的标签页</p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
