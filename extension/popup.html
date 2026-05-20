@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Braiser</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <h1>Braiser</h1>
+        <span id="connectionState" class="state">checking</span>
+      </header>
+
+      <section class="panel" aria-label="当前页面">
+        <div class="label">Active tab</div>
+        <div id="tabTitle" class="title">读取中...</div>
+        <div id="tabUrl" class="url"></div>
+      </section>
+
+      <section class="panel" aria-label="MCP 状态">
+        <div class="label">MCP bridge</div>
+        <div id="bridgeStatus" class="status-text">等待本地 braiser-mcp 连接</div>
+      </section>
+
+      <button id="refreshButton" type="button">刷新状态</button>
+    </main>
+
+    <script type="module" src="dist/popup.js"></script>
+  </body>
+</html>

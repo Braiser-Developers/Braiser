@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Braiser",
+  "version": "0.1.0",
+  "description": "A local safety and memory layer for AI browser agents.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["ws://127.0.0.1:17832/*"],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Braiser"
+  }
+}

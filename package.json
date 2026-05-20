@@ -1,0 +1,23 @@
+{
+  "name": "braiser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:extension && npm run build:mcp",
+    "build:extension": "tsc -p extension/tsconfig.json",
+    "build:mcp": "tsc -p mcp/tsconfig.json",
+    "check": "npm run build",
+    "mcp": "node mcp/dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.306",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2"
+  }
+}
