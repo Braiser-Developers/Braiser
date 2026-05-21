@@ -33,3 +33,7 @@ const fileName = `${dateStamp()}-${slugify(pageName)}.md`;
 - `content.ts`：页面内信息抽取
 
 如果某段逻辑让一个文件同时承担多种职责，移到更合适的位置。
+
+## 同步文件架构文档
+
+如果新增、删除、移动文件，或者改变某个模块的主要职责，同步更新 `docs/file_architecture.md`。
