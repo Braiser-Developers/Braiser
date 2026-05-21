@@ -24,7 +24,11 @@
         <div id="bridgeStatus" class="status-text">等待本地 braiser-mcp 连接</div>
       </section>
 
-      <button id="refreshButton" type="button">刷新状态</button>
+      <section class="actions" aria-label="调试下载">
+        <button id="downloadDomButton" type="button">下载 DOM</button>
+        <button id="downloadObserveButton" type="button">下载 Observe</button>
+        <button id="refreshButton" type="button">刷新状态</button>
+      </section>
     </main>
 
     <script type="module" src="dist/popup.js"></script>

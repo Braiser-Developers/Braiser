@@ -9,6 +9,9 @@ out/
 *.crx
 *.pem
 
+# Root-level debug exports
+/*.html
+
 # Logs
 *.log
 npm-debug.log*

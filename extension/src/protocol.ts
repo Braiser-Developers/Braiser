@@ -2,11 +2,14 @@ export const BRAISER_WS_URL = "ws://127.0.0.1:17832";
 
 export type ExtensionRequestType =
   | "browser.get_active_tab"
-  | "page.extract_readable_text";
+  | "page.extract_readable_text"
+  | "browser.observe"
+  | "browser.act";
 
 export interface ExtensionRequest {
   id: string;
   type: ExtensionRequestType;
+  payload?: unknown;
 }
 
 export interface ExtensionResponse<T = unknown> {
@@ -28,9 +31,46 @@ export interface ReadablePage {
   text: string;
 }
 
+export interface AgentHtmlSnapshot {
+  snapshotId: string;
+  format: "agent-html";
+  html: string;
+  meta: {
+    elementCount: number;
+    truncated: boolean;
+  };
+}
+
+export type BrowserActAction =
+  | "click"
+  | "input-text"
+  | "select-option"
+  | "toggle"
+  | "focus"
+  | "scroll-into-view";
+
+export interface BrowserActInput {
+  snapshotId: string;
+  elementId: string;
+  action: BrowserActAction;
+  text?: string;
+  clearFirst?: boolean;
+  value?: string;
+  checked?: boolean;
+}
+
+export interface BrowserActResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
+  shouldObserveAgain: boolean;
+}
+
 export type PopupRequest =
   | { type: "popup.get_status" }
-  | { type: "popup.get_active_tab" };
+  | { type: "popup.get_active_tab" }
+  | { type: "popup.get_runtime_dom" }
+  | { type: "popup.get_observed_output" };
 
 export interface PopupStatus {
   extensionConnected: boolean;

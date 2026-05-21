@@ -83,10 +83,12 @@ Chrome 扩展会自动尝试连接这个地址。
 
 ## MCP Tools
 
-当前 MVP 暴露 4 个工具：
+当前 MVP 暴露这些工具：
 
 - `braiser.status`：检查 MCP 服务是否正常，以及扩展是否已连接
 - `browser.get_active_tab`：获取当前 active tab 的标题和 URL
+- `browser.observe`：把当前页面压缩成带 `data-eid` 的 agent-html
+- `browser.act`：根据 `snapshotId` 和 `elementId` 执行点击、输入等基础交互
 - `page.extract_readable_text`：抽取当前页面的可读文本
 - `page.save_current_page`：抽取当前页面，并保存为 Markdown
 

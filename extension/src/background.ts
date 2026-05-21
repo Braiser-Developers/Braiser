@@ -1,6 +1,9 @@
 import {
   BRAISER_WS_URL,
   type ActiveTabInfo,
+  type AgentHtmlSnapshot,
+  type BrowserActInput,
+  type BrowserActResult,
   type ExtensionRequest,
   type ExtensionResponse,
   type PopupRequest,
@@ -12,6 +15,7 @@ let socket: WebSocket | null = null;
 let reconnectTimer: number | undefined;
 
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
+const TARGET_TAB_GROUP_TITLE = "Braised";
 
 function scheduleReconnect(): void {
   if (reconnectTimer !== undefined) {
@@ -75,6 +79,10 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return getActiveTabInfo();
     case "page.extract_readable_text":
       return extractReadablePage();
+    case "browser.observe":
+      return observePage();
+    case "browser.act":
+      return actOnPage(request.payload as BrowserActInput);
     default:
       throw new Error(`Unsupported request type: ${(request as ExtensionRequest).type}`);
   }
@@ -99,12 +107,33 @@ function getConnectionState(): PopupStatus["connectionState"] {
 }
 
 async function getActiveTab(): Promise<ActiveChromeTab> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
-    throw new Error("No active tab is available");
+  const groups = await chrome.tabGroups.query({});
+  const targetGroups = groups.filter((group) => group.title === TARGET_TAB_GROUP_TITLE);
+  if (!targetGroups.length) {
+    throw new Error(`No Chrome tab group named "${TARGET_TAB_GROUP_TITLE}" is available`);
   }
 
-  return tab as ActiveChromeTab;
+  const tabs = (
+    await Promise.all(
+      targetGroups.map((group) => chrome.tabs.query({ groupId: group.id }))
+    )
+  )
+    .flat()
+    .filter((tab): tab is ActiveChromeTab => typeof tab.id === "number")
+    .sort((a, b) => {
+      if ((a.windowId ?? 0) !== (b.windowId ?? 0)) {
+        return (a.windowId ?? 0) - (b.windowId ?? 0);
+      }
+
+      return (a.index ?? 0) - (b.index ?? 0);
+    });
+
+  const tab = tabs.at(-1);
+  if (!tab) {
+    throw new Error(`Chrome tab group "${TARGET_TAB_GROUP_TITLE}" does not contain any pages`);
+  }
+
+  return tab;
 }
 
 async function getActiveTabInfo(): Promise<ActiveTabInfo> {
@@ -116,27 +145,56 @@ async function getActiveTabInfo(): Promise<ActiveTabInfo> {
 }
 
 async function extractReadablePage(): Promise<ReadablePage> {
+  return sendContentRequest<ReadablePage>("page.extract_readable_text");
+}
+
+async function observePage(): Promise<AgentHtmlSnapshot> {
+  return sendContentRequest<AgentHtmlSnapshot>("browser.observe");
+}
+
+async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
+  return sendContentRequest<BrowserActResult>("browser.act", input);
+}
+
+async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T> {
   const tab = await getActiveTab();
+  await ensureContentScript(tab.id);
 
-  const [injection] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ["dist/content.js"]
-  });
+  const response = await chrome.tabs.sendMessage(tab.id, { type, payload }) as {
+    ok: boolean;
+    result?: T;
+    error?: string;
+  };
 
-  const page = injection?.result as ReadablePage | undefined;
-  if (!page) {
-    throw new Error("Content script did not return a readable page");
+  if (!response?.ok) {
+    throw new Error(response?.error ?? "Content script request failed");
   }
 
-  return page;
+  return response.result as T;
+}
+
+async function ensureContentScript(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["dist/content.js"]
+  });
 }
 
 chrome.runtime.onMessage.addListener((message: PopupRequest, _sender, sendResponse) => {
-  void handlePopupRequest(message).then(sendResponse);
+  void handlePopupRequest(message)
+    .then((result) => sendResponse({ ok: true, result }))
+    .catch((error: unknown) => {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
   return true;
 });
 
-async function handlePopupRequest(message: PopupRequest): Promise<PopupStatus | ActiveTabInfo> {
+async function handlePopupRequest(
+  message: PopupRequest
+): Promise<PopupStatus | ActiveTabInfo | ReadablePage | AgentHtmlSnapshot> {
   switch (message.type) {
     case "popup.get_status":
       connectWebSocket();
@@ -148,6 +206,10 @@ async function handlePopupRequest(message: PopupRequest): Promise<PopupStatus | 
       };
     case "popup.get_active_tab":
       return getActiveTabInfo();
+    case "popup.get_runtime_dom":
+      return extractReadablePage();
+    case "popup.get_observed_output":
+      return observePage();
     default:
       throw new Error("Unsupported popup request");
   }

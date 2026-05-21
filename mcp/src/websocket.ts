@@ -39,13 +39,13 @@ export class ExtensionBridge {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
-  async request<T>(type: ExtensionRequestType, timeoutMs = 10000): Promise<T> {
+  async request<T>(type: ExtensionRequestType, payload?: unknown, timeoutMs = 10000): Promise<T> {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("Chrome extension is not connected");
     }
 
     const id = randomUUID();
-    const request: ExtensionRequest = { id, type };
+    const request: ExtensionRequest = { id, type, payload };
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {

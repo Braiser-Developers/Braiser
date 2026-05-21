@@ -130,6 +130,8 @@ MCP 服务入口。
 
 - `braiser.status`
 - `browser.get_active_tab`
+- `browser.observe`
+- `browser.act`
 - `page.extract_readable_text`
 - `page.save_current_page`
 
