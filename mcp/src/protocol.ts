@@ -7,7 +7,8 @@ export type ExtensionRequestType =
   | "page.extract_readable_text"
   | "browser.observe"
   | "browser.act"
-  | "debug.inject_js";
+  | "debug.inject_js"
+  | "debug.cdp_command";
 
 export interface ExtensionRequest {
   id: string;
@@ -112,6 +113,16 @@ export interface DebugInjectJsInput {
 }
 
 export interface DebugInjectJsResult {
+  ok: boolean;
+  result?: unknown;
+}
+
+export interface DebugCdpCommandInput {
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+export interface DebugCdpCommandResult {
   ok: boolean;
   result?: unknown;
 }

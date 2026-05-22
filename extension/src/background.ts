@@ -5,6 +5,8 @@ import {
   type BrowserActInput,
   type BrowserActResult,
   type BridgeRuntimeRequest,
+  type DebugCdpCommandInput,
+  type DebugCdpCommandResult,
   type DebugInjectJsInput,
   type DebugInjectJsResult,
   type ExtensionRequest,
@@ -28,6 +30,8 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return actOnPage(request.payload as BrowserActInput);
     case "debug.inject_js":
       return injectDebugJs(request.payload as DebugInjectJsInput);
+    case "debug.cdp_command":
+      return sendDebugCdpCommand(request.payload as DebugCdpCommandInput);
     default:
       throw new Error(`Unsupported request type: ${(request as ExtensionRequest).type}`);
   }
@@ -106,6 +110,42 @@ async function injectDebugJs(input: DebugInjectJsInput): Promise<DebugInjectJsRe
     ok: true,
     result: injection?.result
   };
+}
+
+async function sendDebugCdpCommand(input: DebugCdpCommandInput): Promise<DebugCdpCommandResult> {
+  if (!input || typeof input.method !== "string" || !input.method.trim()) {
+    throw new Error("debug.cdp_command requires a non-empty method string");
+  }
+
+  if (
+    input.params !== undefined &&
+    (!input.params || typeof input.params !== "object" || Array.isArray(input.params))
+  ) {
+    throw new Error("debug.cdp_command params must be an object when provided");
+  }
+
+  const tab = await getActiveTab();
+  const target: chrome.debugger.Debuggee = { tabId: tab.id };
+  let attached = false;
+
+  try {
+    await chrome.debugger.attach(target, "1.3");
+    attached = true;
+    const result = await chrome.debugger.sendCommand(
+      target,
+      input.method,
+      input.params ?? {}
+    );
+
+    return {
+      ok: true,
+      result: JSON.parse(JSON.stringify(result ?? null)) as unknown
+    };
+  } finally {
+    if (attached) {
+      await chrome.debugger.detach(target).catch(() => undefined);
+    }
+  }
 }
 
 async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T> {

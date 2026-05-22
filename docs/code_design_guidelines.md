@@ -35,7 +35,7 @@ const fileName = `${dateStamp()}-${slugify(pageName)}.md`;
 - `debug.ts`：扩展侧 debug bridge，负责持有和 daemon 的 WebSocket 长连接。
 - `content.ts`：页面内信息抽取和受控动作执行。
 
-`debug.inject_js` 这类任意脚本注入能力必须保持 debug-only 命名、描述和文档边界，避免和 `browser.act` 的受控动作集合混在一起。
+`debug.inject_js`、`debug.cdp_command` 这类高权限调试能力必须保持 debug-only 命名、描述和文档边界，避免和 `browser.act` 的受控动作集合混在一起。
 
 如果某段逻辑让一个文件同时承担多种职责，移到更合适的位置。
 

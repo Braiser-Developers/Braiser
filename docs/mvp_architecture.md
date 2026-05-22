@@ -106,6 +106,7 @@ browser.get_active_tab
 browser.observe
 browser.act
 debug.inject_js
+debug.cdp_command
 page.extract_readable_text
 page.save_current_page
 ```
@@ -224,13 +225,30 @@ scroll-into-view
 
 这个工具用于诊断 DOM、样式、框架事件和 observe 缺口，不应作为普通页面自动化能力或产品功能边界。
 
+### `debug.cdp_command`
+
+仅用于调试目的，向 `Braised` tab group 中的目标 tab 发送 Chrome DevTools Protocol 命令。
+
+输入示例：
+
+```json
+{
+  "method": "DOMSnapshot.captureSnapshot",
+  "params": {
+    "computedStyles": []
+  }
+}
+```
+
+扩展会临时 attach 目标 tab，发送命令后 detach。这个工具用于验证浏览器调试协议能否提供比 DOM/JS 启发式更好的诊断信号，不应作为主交互流程。
+
 ## 6. Chrome Extension 权限
 
 当前权限：
 
 ```json
 {
-  "permissions": ["activeTab", "scripting", "storage", "tabGroups"],
+  "permissions": ["activeTab", "debugger", "scripting", "storage", "tabGroups"],
   "host_permissions": [
     "ws://127.0.0.1:17832/*",
     "<all_urls>"
@@ -242,6 +260,7 @@ scroll-into-view
 
 ```text
 activeTab: 保留给扩展交互场景
+debugger: 仅用于 debug.cdp_command 临时发送 CDP 命令
 scripting: 注入 content script
 storage: 保存扩展侧连接状态
 tabGroups: 查找 Braised 标签组
@@ -270,7 +289,7 @@ MVP 暂时不做：
 - 向量索引
 ```
 
-`browser.act` 是有限动作集合，不等同于任意脚本执行。`debug.inject_js` 是显式标注的调试工具，只用于排查和验证页面行为。
+`browser.act` 是有限动作集合，不等同于任意脚本执行。`debug.inject_js` 和 `debug.cdp_command` 是显式标注的调试工具，只用于排查和验证页面行为。
 
 ## 8. 生命周期设计
 
@@ -302,7 +321,8 @@ MVP 成功标准：
 7. Agent 能调用 browser.observe 获取 agent-html
 8. Agent 能调用 browser.act 对 observe 中的元素执行受控动作
 9. Agent 能在调试场景调用 debug.inject_js 检查页面运行时状态
-10. 多个 MCP 会话不会争抢扩展端口 17832
+10. Agent 能在调试场景调用 debug.cdp_command 检查 CDP 诊断信号
+11. 多个 MCP 会话不会争抢扩展端口 17832
 ```
 
 ## 10. 后续演进

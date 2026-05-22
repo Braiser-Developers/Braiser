@@ -104,6 +104,7 @@ ws://127.0.0.1:17833  braiser-mcp -> braiser-daemon
 - `browser.observe`：把目标页面压缩成带 `data-eid` 的 agent-html。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。
 - `debug.inject_js`：仅用于调试，向目标页面 MAIN world 注入 JavaScript，并返回 JSON 可序列化结果。
+- `debug.cdp_command`：仅用于调试，向目标 tab 发送 Chrome DevTools Protocol 命令，并返回 JSON 可序列化结果。
 - `page.extract_readable_text`：抽取目标页面的可读文本。
 - `page.save_current_page`：抽取目标页面并保存为 Markdown。
 

@@ -6,6 +6,8 @@ import type {
   BrowserActInput,
   BrowserActResult,
   CleanPage,
+  DebugCdpCommandInput,
+  DebugCdpCommandResult,
   DebugInjectJsInput,
   DebugInjectJsResult,
   ReadablePage
@@ -103,6 +105,25 @@ export const tools: Tool[] = [
     }
   },
   {
+    name: "debug.cdp_command",
+    description: "For debug purpose only: send a Chrome DevTools Protocol command to the active Braised tab and return a JSON-serializable result.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          description: "CDP method name, such as DOMSnapshot.captureSnapshot."
+        },
+        params: {
+          type: "object",
+          description: "Optional CDP command parameters."
+        }
+      },
+      required: ["method"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "page.extract_readable_text",
     description: "Extract readable text from the last Chrome tab in the Braised tab group.",
     inputSchema: {
@@ -147,6 +168,9 @@ export async function callTool(
     case "debug.inject_js":
       return bridge.request<DebugInjectJsResult>("debug.inject_js", assertDebugInjectJsInput(args));
 
+    case "debug.cdp_command":
+      return bridge.request<DebugCdpCommandResult>("debug.cdp_command", assertDebugCdpCommandInput(args));
+
     case "page.extract_readable_text":
       return extractReadableText(bridge);
 
@@ -166,6 +190,24 @@ function assertBrowserActInput(args: Record<string, unknown>): BrowserActInput {
   }
 
   return args as unknown as BrowserActInput;
+}
+
+function assertDebugCdpCommandInput(args: Record<string, unknown>): DebugCdpCommandInput {
+  if (typeof args.method !== "string" || !args.method.trim()) {
+    throw new Error("debug.cdp_command requires a non-empty method string");
+  }
+
+  if (
+    args.params !== undefined &&
+    (!args.params || typeof args.params !== "object" || Array.isArray(args.params))
+  ) {
+    throw new Error("debug.cdp_command params must be an object when provided");
+  }
+
+  return {
+    method: args.method,
+    params: args.params as Record<string, unknown> | undefined
+  };
 }
 
 function assertDebugInjectJsInput(args: Record<string, unknown>): DebugInjectJsInput {
