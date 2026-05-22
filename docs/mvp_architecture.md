@@ -95,6 +95,8 @@ Chrome Extension debug bridge
 ```
 
 `browser.observe` 走同一条链路，但返回压缩后的 agent-html 和 `data-eid`。`browser.act` 使用最近一次 observe 快照中的 `snapshotId` 和 `elementId` 在页面内执行受控动作。
+observe 的可交互元素集合以 DOM/ARIA 规则为基础，并用 CDP `DOMSnapshot.captureSnapshot` 的 `isClickable` 信号补充普通 selector 难以发现的委托点击元素。
+CDP 只负责发现和临时标记节点：background 在同一个 CDP session 中用 `DOM.getDocument` 初始化 DOM frontend，再通过 `DOM.pushNodesByBackendIdsToFrontend` 和 `DOM.setAttributeValue` 给 clickable 节点写入 `data-braiser-cdp-clickable="true"`。content script 读取该临时属性后将元素纳入 observe，background 随后清理属性。
 
 ## 5. 当前 MCP Tools
 
@@ -169,6 +171,8 @@ page.save_current_page
 观察目标页面，返回压缩后的 agent-html。
 
 agent-html 会保留可交互元素及其必要上下文，并为可操作元素分配 `data-eid`。
+可交互元素来源包括标准表单/链接/按钮/ARIA 规则，以及 CDP `isClickable` 标出的元素。
+`meta.debug` 当前包含 CDP 标记链路的诊断计数，例如 background 标记数、content 看到的临时标记数、候选元素数和 selector 状态。
 
 返回示例：
 

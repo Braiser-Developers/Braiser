@@ -101,7 +101,7 @@ ws://127.0.0.1:17833  braiser-mcp -> braiser-daemon
 
 - `braiser.status`：检查 MCP、daemon 和扩展连接状态。
 - `browser.get_active_tab`：获取 `Braised` tab group 中目标页面的标题和 URL。名称保留 `active_tab` 是为了兼容早期调用方。
-- `browser.observe`：把目标页面压缩成带 `data-eid` 的 agent-html。
+- `browser.observe`：把目标页面压缩成带 `data-eid` 的 agent-html；除 DOM/ARIA 规则外，也会纳入 CDP `isClickable` 发现的元素。CDP 节点通过 `DOM.pushNodesByBackendIdsToFrontend` 和 `DOM.setAttributeValue` 临时标记，不执行页面 JavaScript。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。
 - `debug.inject_js`：仅用于调试，向目标页面 MAIN world 注入 JavaScript，并返回 JSON 可序列化结果。
 - `debug.cdp_command`：仅用于调试，向目标 tab 发送 Chrome DevTools Protocol 命令，并返回 JSON 可序列化结果。

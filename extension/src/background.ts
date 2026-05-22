@@ -17,6 +17,20 @@ import {
 
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
 const TARGET_TAB_GROUP_TITLE = "Braised";
+const CDP_CLICKABLE_ATTRIBUTE = "data-braiser-cdp-clickable";
+const CDP_CLICKABLE_VALUE = "true";
+
+interface CdpSnapshotResult {
+  documents?: Array<{
+    nodes?: {
+      backendNodeId?: number[];
+      isClickable?: {
+        index?: number[];
+      };
+      nodeType?: number[];
+    };
+  }>;
+}
 
 async function handleExtensionRequest(request: ExtensionRequest): Promise<unknown> {
   switch (request.type) {
@@ -80,7 +94,19 @@ async function extractReadablePage(): Promise<ReadablePage> {
 }
 
 async function observePage(): Promise<AgentHtmlSnapshot> {
-  return sendContentRequest<AgentHtmlSnapshot>("browser.observe");
+  const tab = await getActiveTab();
+  await ensureContentScript(tab.id);
+
+  const cdpClickableMarkedCount = await markCdpClickableElements(tab.id);
+  const backgroundMarkerDomCount = await countCdpClickableMarkers(tab.id);
+  try {
+    return sendContentRequestToTab<AgentHtmlSnapshot>(tab.id, "browser.observe", {
+      cdpClickableMarkedCount,
+      backgroundMarkerDomCount
+    });
+  } finally {
+    await clearCdpClickableMarkers(tab.id);
+  }
 }
 
 async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
@@ -125,22 +151,119 @@ async function sendDebugCdpCommand(input: DebugCdpCommandInput): Promise<DebugCd
   }
 
   const tab = await getActiveTab();
-  const target: chrome.debugger.Debuggee = { tabId: tab.id };
+  const result = await withDebuggerSession(tab.id, (target) =>
+    chrome.debugger.sendCommand(
+      target,
+      input.method,
+      input.params ?? {}
+    )
+  );
+
+  return {
+    ok: true,
+    result: JSON.parse(JSON.stringify(result ?? null)) as unknown
+  };
+}
+
+async function markCdpClickableElements(tabId: number): Promise<number> {
+  try {
+    return await withDebuggerSession(tabId, async (target) => {
+      await chrome.debugger.sendCommand(target, "DOM.getDocument", { depth: 0 });
+      const snapshot = await chrome.debugger.sendCommand(
+        target,
+        "DOMSnapshot.captureSnapshot",
+        { computedStyles: [] }
+      ) as CdpSnapshotResult;
+      const nodes = snapshot.documents?.[0]?.nodes;
+      const clickableIndexes = nodes?.isClickable?.index ?? [];
+      const backendNodeIds = nodes?.backendNodeId ?? [];
+      const nodeTypes = nodes?.nodeType ?? [];
+      let markedCount = 0;
+
+      for (const nodeIndex of clickableIndexes) {
+        if (nodeTypes[nodeIndex] !== 1) {
+          continue;
+        }
+
+        const backendNodeId = backendNodeIds[nodeIndex];
+        if (!backendNodeId) {
+          continue;
+        }
+
+        if (await setCdpBackendNodeAttribute(target, backendNodeId)) {
+          markedCount++;
+        }
+      }
+
+      return markedCount;
+    });
+  } catch {
+    // CDP clickability is a best-effort supplement; base observe should still work.
+    return 0;
+  }
+}
+
+async function setCdpBackendNodeAttribute(
+  target: chrome.debugger.Debuggee,
+  backendNodeId: number
+): Promise<boolean> {
+  try {
+    const pushed = await chrome.debugger.sendCommand(
+      target,
+      "DOM.pushNodesByBackendIdsToFrontend",
+      { backendNodeIds: [backendNodeId] }
+    ) as {
+      nodeIds?: number[];
+    };
+    const nodeId = pushed.nodeIds?.[0];
+    if (!nodeId) {
+      return false;
+    }
+
+    await chrome.debugger.sendCommand(target, "DOM.setAttributeValue", {
+      nodeId,
+      name: CDP_CLICKABLE_ATTRIBUTE,
+      value: CDP_CLICKABLE_VALUE
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clearCdpClickableMarkers(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (attributeName: string) => {
+      document.querySelectorAll(`[${attributeName}]`).forEach((element) => {
+        element.removeAttribute(attributeName);
+      });
+    },
+    args: [CDP_CLICKABLE_ATTRIBUTE]
+  }).catch(() => undefined);
+}
+
+async function countCdpClickableMarkers(tabId: number): Promise<number> {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (attributeName: string) => document.querySelectorAll(`[${attributeName}]`).length,
+    args: [CDP_CLICKABLE_ATTRIBUTE]
+  });
+
+  return typeof result?.result === "number" ? result.result : 0;
+}
+
+async function withDebuggerSession<T>(
+  tabId: number,
+  callback: (target: chrome.debugger.Debuggee) => Promise<T>
+): Promise<T> {
+  const target: chrome.debugger.Debuggee = { tabId };
   let attached = false;
 
   try {
     await chrome.debugger.attach(target, "1.3");
     attached = true;
-    const result = await chrome.debugger.sendCommand(
-      target,
-      input.method,
-      input.params ?? {}
-    );
-
-    return {
-      ok: true,
-      result: JSON.parse(JSON.stringify(result ?? null)) as unknown
-    };
+    return await callback(target);
   } finally {
     if (attached) {
       await chrome.debugger.detach(target).catch(() => undefined);
@@ -152,7 +275,15 @@ async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T
   const tab = await getActiveTab();
   await ensureContentScript(tab.id);
 
-  const response = await chrome.tabs.sendMessage(tab.id, { type, payload }) as {
+  return sendContentRequestToTab<T>(tab.id, type, payload);
+}
+
+async function sendContentRequestToTab<T>(
+  tabId: number,
+  type: string,
+  payload?: unknown
+): Promise<T> {
+  const response = await chrome.tabs.sendMessage(tabId, { type, payload }) as {
     ok: boolean;
     result?: T;
     error?: string;

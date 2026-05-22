@@ -40,6 +40,7 @@ export interface AgentHtmlSnapshot {
   meta: {
     elementCount: number;
     truncated: boolean;
+    debug?: Record<string, unknown>;
   };
 }
 

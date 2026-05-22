@@ -12,7 +12,13 @@ interface AgentHtmlSnapshot {
   meta: {
     elementCount: number;
     truncated: boolean;
+    debug?: Record<string, unknown>;
   };
+}
+
+interface ObserveInput {
+  cdpClickableMarkedCount?: number;
+  backgroundMarkerDomCount?: number;
 }
 
 type BrowserActAction =
@@ -54,6 +60,7 @@ interface RegistryState {
 const GLOBAL_KEY = "__braiserContentState";
 const MAX_TEXT_LENGTH = 120;
 const MAX_AGENT_HTML_LENGTH = 60000;
+const CDP_CLICKABLE_ATTRIBUTE = "data-braiser-cdp-clickable";
 const INTERACTIVE_SELECTOR = [
   "a[href]",
   "button",
@@ -72,7 +79,8 @@ const INTERACTIVE_SELECTOR = [
   "[tabindex='0']",
   "[aria-haspopup]",
   "[aria-expanded]",
-  "[onclick]"
+  "[onclick]",
+  `[${CDP_CLICKABLE_ATTRIBUTE}='true']`
 ].join(",");
 
 const SEMANTIC_TAGS = new Set([
@@ -159,7 +167,7 @@ async function handleContentRequest(message: ContentRequest): Promise<unknown> {
     case "page.extract_readable_text":
       return extractReadablePage();
     case "browser.observe":
-      return observePage();
+      return observePage(assertObserveInput(message.payload));
     case "browser.act":
       return actOnElement(assertActInput(message.payload));
     default:
@@ -204,7 +212,7 @@ function extractReadablePage(): ReadablePage {
   };
 }
 
-function observePage(): AgentHtmlSnapshot {
+function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
   const snapshotId = `S${state.nextSnapshotNumber++}`;
   const registry: RegistryState = {
     snapshotId,
@@ -212,6 +220,9 @@ function observePage(): AgentHtmlSnapshot {
   };
 
   const interactiveElements = collectInteractiveElements();
+  const cdpMarkedCount = document.querySelectorAll(
+    `[${CDP_CLICKABLE_ATTRIBUTE}='true']`
+  ).length;
   const keptElements = collectKeptElements(interactiveElements);
   const bodyHtml = serializeChildren(document.body, keptElements, registry);
   const pageOpen = `<page snapshot="${escapeAttribute(snapshotId)}" title="${escapeAttribute(document.title)}" url="${escapeAttribute(window.location.href)}">`;
@@ -231,8 +242,31 @@ function observePage(): AgentHtmlSnapshot {
     html,
     meta: {
       elementCount: registry.elements.size,
-      truncated
+      truncated,
+      debug: {
+        backgroundCdpMarkedCount: input.cdpClickableMarkedCount ?? null,
+        backgroundMarkerDomCount: input.backgroundMarkerDomCount ?? null,
+        contentCdpMarkedCount: cdpMarkedCount,
+        interactiveCandidateCount: interactiveElements.length,
+        selectorHasCdpClickable: INTERACTIVE_SELECTOR.includes(CDP_CLICKABLE_ATTRIBUTE)
+      }
     }
+  };
+}
+
+function assertObserveInput(payload: unknown): ObserveInput {
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+
+  const input = payload as Partial<ObserveInput>;
+  return {
+    cdpClickableMarkedCount: typeof input.cdpClickableMarkedCount === "number"
+      ? input.cdpClickableMarkedCount
+      : undefined,
+    backgroundMarkerDomCount: typeof input.backgroundMarkerDomCount === "number"
+      ? input.backgroundMarkerDomCount
+      : undefined
   };
 }
 
