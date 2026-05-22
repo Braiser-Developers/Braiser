@@ -72,6 +72,11 @@ export type PopupRequest =
   | { type: "popup.get_runtime_dom" }
   | { type: "popup.get_observed_output" };
 
+export interface BridgeRuntimeRequest {
+  type: "bridge.handle_extension_request";
+  request: ExtensionRequest;
+}
+
 export interface PopupStatus {
   extensionConnected: boolean;
   connectionState: "connected" | "connecting" | "offline";

@@ -4,74 +4,15 @@ import {
   type AgentHtmlSnapshot,
   type BrowserActInput,
   type BrowserActResult,
+  type BridgeRuntimeRequest,
   type ExtensionRequest,
-  type ExtensionResponse,
   type PopupRequest,
   type PopupStatus,
   type ReadablePage
 } from "./protocol.js";
 
-let socket: WebSocket | null = null;
-let reconnectTimer: number | undefined;
-
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
 const TARGET_TAB_GROUP_TITLE = "Braised";
-
-function scheduleReconnect(): void {
-  if (reconnectTimer !== undefined) {
-    return;
-  }
-
-  reconnectTimer = self.setTimeout(() => {
-    reconnectTimer = undefined;
-    connectWebSocket();
-  }, 1500);
-}
-
-function connectWebSocket(): void {
-  if (
-    socket?.readyState === WebSocket.CONNECTING ||
-    socket?.readyState === WebSocket.OPEN
-  ) {
-    return;
-  }
-
-  socket = new WebSocket(BRAISER_WS_URL);
-
-  socket.addEventListener("open", () => {
-    chrome.storage.local.set({ connectionState: getConnectionState() });
-  });
-
-  socket.addEventListener("close", () => {
-    chrome.storage.local.set({ connectionState: getConnectionState() });
-    scheduleReconnect();
-  });
-
-  socket.addEventListener("error", () => {
-    socket?.close();
-  });
-
-  socket.addEventListener("message", (event) => {
-    handleSocketMessage(event.data).catch((error: unknown) => {
-      console.error("Braiser message handling failed", error);
-    });
-  });
-}
-
-async function handleSocketMessage(rawData: string): Promise<void> {
-  const request = JSON.parse(rawData) as ExtensionRequest;
-
-  try {
-    const result = await handleExtensionRequest(request);
-    sendResponse({ id: request.id, ok: true, result });
-  } catch (error) {
-    sendResponse({
-      id: request.id,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-}
 
 async function handleExtensionRequest(request: ExtensionRequest): Promise<unknown> {
   switch (request.type) {
@@ -86,24 +27,6 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
     default:
       throw new Error(`Unsupported request type: ${(request as ExtensionRequest).type}`);
   }
-}
-
-function sendResponse(response: ExtensionResponse): void {
-  if (socket?.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(response));
-  }
-}
-
-function getConnectionState(): PopupStatus["connectionState"] {
-  if (socket?.readyState === WebSocket.OPEN) {
-    return "connected";
-  }
-
-  if (socket?.readyState === WebSocket.CONNECTING) {
-    return "connecting";
-  }
-
-  return "offline";
 }
 
 async function getActiveTab(): Promise<ActiveChromeTab> {
@@ -180,8 +103,8 @@ async function ensureContentScript(tabId: number): Promise<void> {
   });
 }
 
-chrome.runtime.onMessage.addListener((message: PopupRequest, _sender, sendResponse) => {
-  void handlePopupRequest(message)
+chrome.runtime.onMessage.addListener((message: PopupRequest | BridgeRuntimeRequest, _sender, sendResponse) => {
+  void handleRuntimeRequest(message)
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error: unknown) => {
       sendResponse({
@@ -192,13 +115,24 @@ chrome.runtime.onMessage.addListener((message: PopupRequest, _sender, sendRespon
   return true;
 });
 
+async function handleRuntimeRequest(
+  message: PopupRequest | BridgeRuntimeRequest
+): Promise<PopupStatus | ActiveTabInfo | ReadablePage | AgentHtmlSnapshot | unknown> {
+  if (message.type === "bridge.handle_extension_request") {
+    return handleExtensionRequest(message.request);
+  }
+
+  return handlePopupRequest(message);
+}
+
 async function handlePopupRequest(
   message: PopupRequest
 ): Promise<PopupStatus | ActiveTabInfo | ReadablePage | AgentHtmlSnapshot> {
   switch (message.type) {
     case "popup.get_status":
-      connectWebSocket();
-      const connectionState = getConnectionState();
+      const { connectionState = "offline" } = await chrome.storage.local.get("connectionState") as {
+        connectionState?: PopupStatus["connectionState"];
+      };
       return {
         extensionConnected: connectionState === "connected",
         connectionState,
@@ -214,5 +148,3 @@ async function handlePopupRequest(
       throw new Error("Unsupported popup request");
   }
 }
-
-connectWebSocket();

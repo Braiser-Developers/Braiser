@@ -7,6 +7,7 @@ const tabUrl = getElement("tabUrl");
 const refreshButton = getElement("refreshButton");
 const downloadDomButton = getElement("downloadDomButton") as HTMLButtonElement;
 const downloadObserveButton = getElement("downloadObserveButton") as HTMLButtonElement;
+const openBridgeButton = getElement("openBridgeButton") as HTMLButtonElement;
 
 function getElement(id: string): HTMLElement {
   const element = document.getElementById(id);
@@ -57,6 +58,10 @@ downloadDomButton.addEventListener("click", () => {
 
 downloadObserveButton.addEventListener("click", () => {
   downloadObservedOutput().catch(showError);
+});
+
+openBridgeButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("debug.html") }).catch(showError);
 });
 
 refresh().catch((error: unknown) => {
