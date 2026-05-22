@@ -1,10 +1,13 @@
-export const BRAISER_WS_PORT = 17832;
+export const BRAISER_EXTENSION_WS_PORT = 17832;
+export const BRAISER_DAEMON_WS_PORT = 17833;
+export const BRAISER_WS_PORT = BRAISER_EXTENSION_WS_PORT;
 
 export type ExtensionRequestType =
   | "browser.get_active_tab"
   | "page.extract_readable_text"
   | "browser.observe"
-  | "browser.act";
+  | "browser.act"
+  | "debug.inject_js";
 
 export interface ExtensionRequest {
   id: string;
@@ -17,6 +20,38 @@ export interface ExtensionResponse<T = unknown> {
   ok: boolean;
   result?: T;
   error?: string;
+}
+
+export type DaemonRequest =
+  | {
+      id: string;
+      type: "daemon.status";
+    }
+  | {
+      id: string;
+      type: "extension.request";
+      request: Omit<ExtensionRequest, "id">;
+    };
+
+export type DaemonRequestInput =
+  | {
+      type: "daemon.status";
+    }
+  | {
+      type: "extension.request";
+      request: Omit<ExtensionRequest, "id">;
+    };
+
+export interface DaemonResponse<T = unknown> {
+  id: string;
+  ok: boolean;
+  result?: T;
+  error?: string;
+}
+
+export interface DaemonStatus {
+  daemon: "ok";
+  extensionConnected: boolean;
 }
 
 export interface ActiveTabInfo {
@@ -70,4 +105,13 @@ export interface BrowserActResult {
   message?: string;
   error?: string;
   shouldObserveAgain: boolean;
+}
+
+export interface DebugInjectJsInput {
+  script: string;
+}
+
+export interface DebugInjectJsResult {
+  ok: boolean;
+  result?: unknown;
 }

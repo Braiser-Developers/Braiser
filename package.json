@@ -8,7 +8,8 @@
     "build:extension": "tsc -p extension/tsconfig.json",
     "build:mcp": "tsc -p mcp/tsconfig.json",
     "check": "npm run build",
-    "mcp": "node mcp/dist/server.js"
+    "mcp": "node mcp/dist/server.js",
+    "daemon": "node mcp/dist/daemon.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

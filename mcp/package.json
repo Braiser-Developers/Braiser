@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "bin": {
-    "braiser-mcp": "dist/server.js"
+    "braiser-mcp": "dist/server.js",
+    "braiser-daemon": "dist/daemon.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "daemon": "node dist/daemon.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

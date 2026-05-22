@@ -5,6 +5,8 @@ import {
   type BrowserActInput,
   type BrowserActResult,
   type BridgeRuntimeRequest,
+  type DebugInjectJsInput,
+  type DebugInjectJsResult,
   type ExtensionRequest,
   type PopupRequest,
   type PopupStatus,
@@ -24,6 +26,8 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return observePage();
     case "browser.act":
       return actOnPage(request.payload as BrowserActInput);
+    case "debug.inject_js":
+      return injectDebugJs(request.payload as DebugInjectJsInput);
     default:
       throw new Error(`Unsupported request type: ${(request as ExtensionRequest).type}`);
   }
@@ -77,6 +81,31 @@ async function observePage(): Promise<AgentHtmlSnapshot> {
 
 async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
   return sendContentRequest<BrowserActResult>("browser.act", input);
+}
+
+async function injectDebugJs(input: DebugInjectJsInput): Promise<DebugInjectJsResult> {
+  if (!input || typeof input.script !== "string" || !input.script.trim()) {
+    throw new Error("debug.inject_js requires a non-empty script string");
+  }
+
+  const tab = await getActiveTab();
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: "MAIN",
+    func: async (script: string) => {
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as {
+        new (source: string): () => Promise<unknown>;
+      };
+      const value = await new AsyncFunction(script)();
+      return JSON.parse(JSON.stringify(value ?? null)) as unknown;
+    },
+    args: [input.script]
+  });
+
+  return {
+    ok: true,
+    result: injection?.result
+  };
 }
 
 async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T> {

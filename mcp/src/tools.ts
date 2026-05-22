@@ -6,6 +6,8 @@ import type {
   BrowserActInput,
   BrowserActResult,
   CleanPage,
+  DebugInjectJsInput,
+  DebugInjectJsResult,
   ReadablePage
 } from "./protocol.js";
 import { cleanReadablePage } from "./cleaner.js";
@@ -86,6 +88,21 @@ export const tools: Tool[] = [
     }
   },
   {
+    name: "debug.inject_js",
+    description: "For debug purpose only: directly inject JavaScript into the active Braised page and return a JSON-serializable result.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        script: {
+          type: "string",
+          description: "JavaScript function body to run in the page MAIN world. Use return to send back a JSON-serializable value."
+        }
+      },
+      required: ["script"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "page.extract_readable_text",
     description: "Extract readable text from the last Chrome tab in the Braised tab group.",
     inputSchema: {
@@ -114,7 +131,8 @@ export async function callTool(
     case "braiser.status":
       return {
         mcp: "ok",
-        extensionConnected: bridge.isExtensionConnected()
+        daemonConnected: await bridge.isDaemonConnected(),
+        extensionConnected: await bridge.isExtensionConnected()
       };
 
     case "browser.get_active_tab":
@@ -125,6 +143,9 @@ export async function callTool(
 
     case "browser.act":
       return bridge.request<BrowserActResult>("browser.act", assertBrowserActInput(args));
+
+    case "debug.inject_js":
+      return bridge.request<DebugInjectJsResult>("debug.inject_js", assertDebugInjectJsInput(args));
 
     case "page.extract_readable_text":
       return extractReadableText(bridge);
@@ -145,6 +166,16 @@ function assertBrowserActInput(args: Record<string, unknown>): BrowserActInput {
   }
 
   return args as unknown as BrowserActInput;
+}
+
+function assertDebugInjectJsInput(args: Record<string, unknown>): DebugInjectJsInput {
+  if (typeof args.script !== "string" || !args.script.trim()) {
+    throw new Error("debug.inject_js requires a non-empty script string");
+  }
+
+  return {
+    script: args.script
+  };
 }
 
 async function extractReadableText(bridge: ExtensionBridge): Promise<CleanPage> {

@@ -4,7 +4,8 @@ export type ExtensionRequestType =
   | "browser.get_active_tab"
   | "page.extract_readable_text"
   | "browser.observe"
-  | "browser.act";
+  | "browser.act"
+  | "debug.inject_js";
 
 export interface ExtensionRequest {
   id: string;
@@ -64,6 +65,15 @@ export interface BrowserActResult {
   message?: string;
   error?: string;
   shouldObserveAgain: boolean;
+}
+
+export interface DebugInjectJsInput {
+  script: string;
+}
+
+export interface DebugInjectJsResult {
+  ok: boolean;
+  result?: unknown;
 }
 
 export type PopupRequest =
