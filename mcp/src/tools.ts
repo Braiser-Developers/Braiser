@@ -5,6 +5,12 @@ import type {
   AgentHtmlSnapshot,
   BrowserActInput,
   BrowserActResult,
+  BrowserCloseTabInput,
+  BrowserCreateTabInput,
+  BrowserOpenTabInput,
+  BrowserSwitchTabInput,
+  BrowserTabInfo,
+  BrowserTabList,
   CleanPage,
   DebugCdpCommandInput,
   DebugCdpCommandResult,
@@ -27,7 +33,7 @@ export const tools: Tool[] = [
   },
   {
     name: "browser.get_active_tab",
-    description: "Get the title and URL of the last Chrome tab in the Braised tab group.",
+    description: "Get the currently focused tab in the Braised tab group. All observation and action tools target this tab.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -35,8 +41,91 @@ export const tools: Tool[] = [
     }
   },
   {
+    name: "browser.list_tabs",
+    description: "List tabs in the Braised tab group and identify the current agent focus tab.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser.create_tab",
+    description: "Create a new tab in the Braised tab group and make it the agent focus tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Optional URL to open in the new tab. Bare domains are normalized to https://."
+        },
+        active: {
+          type: "boolean",
+          description: "Whether to also make Chrome visually activate the tab. Defaults to true."
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser.open_tab",
+    description: "Open a URL in a Braised tab. Defaults to the current agent focus tab when tabId is omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "number",
+          description: "Target tab id from browser.list_tabs or browser.get_active_tab."
+        },
+        url: {
+          type: "string",
+          description: "URL to open. Bare domains are normalized to https://."
+        },
+        active: {
+          type: "boolean",
+          description: "Whether to also make Chrome visually activate the tab."
+        }
+      },
+      required: ["url"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser.close_tab",
+    description: "Close a Braised tab. Defaults to the current agent focus tab when tabId is omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "number",
+          description: "Target tab id from browser.list_tabs or browser.get_active_tab."
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser.switch_tab",
+    description: "Switch the agent focus to a tab in the Braised tab group. Later MCP reads and actions target this tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: {
+          type: "number",
+          description: "Target tab id from browser.list_tabs or browser.get_active_tab."
+        },
+        activate: {
+          type: "boolean",
+          description: "Whether to also make Chrome visually activate the tab. Defaults to true."
+        }
+      },
+      required: ["tabId"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "browser.observe",
-    description: "Observe the last Chrome tab in the Braised tab group and return compressed agent-html with data-eid handles for interactive elements.",
+    description: "Observe the current agent focus tab in the Braised tab group and return compressed agent-html with data-eid handles for interactive elements.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -91,7 +180,7 @@ export const tools: Tool[] = [
   },
   {
     name: "debug.inject_js",
-    description: "For debug purpose only: directly inject JavaScript into the active Braised page and return a JSON-serializable result.",
+    description: "For debug purpose only: directly inject JavaScript into the current agent focus Braised page and return a JSON-serializable result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -106,7 +195,7 @@ export const tools: Tool[] = [
   },
   {
     name: "debug.cdp_command",
-    description: "For debug purpose only: send a Chrome DevTools Protocol command to the active Braised tab and return a JSON-serializable result.",
+    description: "For debug purpose only: send a Chrome DevTools Protocol command to the current agent focus Braised tab and return a JSON-serializable result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -125,7 +214,7 @@ export const tools: Tool[] = [
   },
   {
     name: "page.extract_readable_text",
-    description: "Extract readable text from the last Chrome tab in the Braised tab group.",
+    description: "Extract readable text from the current agent focus tab in the Braised tab group.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -134,7 +223,7 @@ export const tools: Tool[] = [
   },
   {
     name: "page.save_current_page",
-    description: "Extract the last Chrome tab in the Braised tab group and save it locally as Markdown.",
+    description: "Extract the current agent focus tab in the Braised tab group and save it locally as Markdown.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -159,6 +248,21 @@ export async function callTool(
     case "browser.get_active_tab":
       return bridge.request<ActiveTabInfo>("browser.get_active_tab");
 
+    case "browser.list_tabs":
+      return bridge.request<BrowserTabList>("browser.list_tabs");
+
+    case "browser.create_tab":
+      return bridge.request<BrowserTabInfo>("browser.create_tab", assertBrowserCreateTabInput(args));
+
+    case "browser.open_tab":
+      return bridge.request<BrowserTabInfo>("browser.open_tab", assertBrowserOpenTabInput(args));
+
+    case "browser.close_tab":
+      return bridge.request<BrowserTabList>("browser.close_tab", assertBrowserCloseTabInput(args));
+
+    case "browser.switch_tab":
+      return bridge.request<BrowserTabInfo>("browser.switch_tab", assertBrowserSwitchTabInput(args));
+
     case "browser.observe":
       return bridge.request<AgentHtmlSnapshot>("browser.observe");
 
@@ -180,6 +284,66 @@ export async function callTool(
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+function assertOptionalTabId(tabId: unknown, fieldName = "tabId"): number | undefined {
+  if (tabId === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(tabId)) {
+    throw new Error(`${fieldName} must be an integer when provided`);
+  }
+  return tabId as number;
+}
+
+function assertOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean when provided`);
+  }
+  return value;
+}
+
+function assertBrowserCreateTabInput(args: Record<string, unknown>): BrowserCreateTabInput {
+  if (args.url !== undefined && typeof args.url !== "string") {
+    throw new Error("browser.create_tab url must be a string when provided");
+  }
+
+  return {
+    url: args.url as string | undefined,
+    active: assertOptionalBoolean(args.active, "active")
+  };
+}
+
+function assertBrowserOpenTabInput(args: Record<string, unknown>): BrowserOpenTabInput {
+  if (typeof args.url !== "string" || !args.url.trim()) {
+    throw new Error("browser.open_tab requires a non-empty url string");
+  }
+
+  return {
+    tabId: assertOptionalTabId(args.tabId),
+    url: args.url,
+    active: assertOptionalBoolean(args.active, "active")
+  };
+}
+
+function assertBrowserCloseTabInput(args: Record<string, unknown>): BrowserCloseTabInput {
+  return {
+    tabId: assertOptionalTabId(args.tabId)
+  };
+}
+
+function assertBrowserSwitchTabInput(args: Record<string, unknown>): BrowserSwitchTabInput {
+  if (!Number.isInteger(args.tabId)) {
+    throw new Error("browser.switch_tab requires an integer tabId");
+  }
+
+  return {
+    tabId: args.tabId as number,
+    activate: assertOptionalBoolean(args.activate, "activate")
+  };
 }
 
 function assertBrowserActInput(args: Record<string, unknown>): BrowserActInput {
