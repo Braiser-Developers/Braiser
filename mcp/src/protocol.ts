@@ -4,6 +4,11 @@ export const BRAISER_WS_PORT = BRAISER_EXTENSION_WS_PORT;
 
 export type ExtensionRequestType =
   | "browser.get_active_tab"
+  | "browser.list_tabs"
+  | "browser.create_tab"
+  | "browser.open_tab"
+  | "browser.close_tab"
+  | "browser.switch_tab"
   | "page.extract_readable_text"
   | "browser.observe"
   | "browser.act"
@@ -56,8 +61,40 @@ export interface DaemonStatus {
 }
 
 export interface ActiveTabInfo {
+  tabId: number;
   title: string;
   url: string;
+  windowId: number;
+  index: number;
+  active: boolean;
+  focused: boolean;
+}
+
+export type BrowserTabInfo = ActiveTabInfo;
+
+export interface BrowserTabList {
+  focusedTabId: number;
+  tabs: BrowserTabInfo[];
+}
+
+export interface BrowserCreateTabInput {
+  url?: string;
+  active?: boolean;
+}
+
+export interface BrowserOpenTabInput {
+  tabId?: number;
+  url: string;
+  active?: boolean;
+}
+
+export interface BrowserCloseTabInput {
+  tabId?: number;
+}
+
+export interface BrowserSwitchTabInput {
+  tabId: number;
+  activate?: boolean;
 }
 
 export interface ReadablePage {

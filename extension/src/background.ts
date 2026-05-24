@@ -4,6 +4,12 @@ import {
   type AgentHtmlSnapshot,
   type BrowserActInput,
   type BrowserActResult,
+  type BrowserCloseTabInput,
+  type BrowserCreateTabInput,
+  type BrowserOpenTabInput,
+  type BrowserSwitchTabInput,
+  type BrowserTabInfo,
+  type BrowserTabList,
   type BridgeRuntimeRequest,
   type DebugCdpCommandInput,
   type DebugCdpCommandResult,
@@ -18,6 +24,7 @@ import {
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
 const TARGET_TAB_GROUP_TITLE = "Braised";
 const CDP_BRIDGE_GLOBAL = "__braiserCdpBridge";
+const FOCUSED_TAB_STORAGE_KEY = "focusedBraisedTabId";
 
 interface CdpSnapshotResult {
   documents?: Array<{
@@ -66,6 +73,16 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
   switch (request.type) {
     case "browser.get_active_tab":
       return getActiveTabInfo();
+    case "browser.list_tabs":
+      return listTabs();
+    case "browser.create_tab":
+      return createTab(request.payload as BrowserCreateTabInput);
+    case "browser.open_tab":
+      return openTab(request.payload as BrowserOpenTabInput);
+    case "browser.close_tab":
+      return closeTab(request.payload as BrowserCloseTabInput);
+    case "browser.switch_tab":
+      return switchTab(request.payload as BrowserSwitchTabInput);
     case "page.extract_readable_text":
       return extractReadablePage();
     case "browser.observe":
@@ -82,6 +99,23 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
 }
 
 async function getActiveTab(): Promise<ActiveChromeTab> {
+  const tabs = await getBraisedTabs();
+  const focusedTabId = await getFocusedTabId();
+  const focusedTab = tabs.find((tab) => tab.id === focusedTabId);
+  if (focusedTab) {
+    return focusedTab;
+  }
+
+  const fallback = tabs.at(-1);
+  if (!fallback) {
+    throw new Error(`Chrome tab group "${TARGET_TAB_GROUP_TITLE}" does not contain any pages`);
+  }
+
+  await setFocusedTabId(fallback.id);
+  return fallback;
+}
+
+async function getBraisedTabs(): Promise<ActiveChromeTab[]> {
   const groups = await chrome.tabGroups.query({});
   const targetGroups = groups.filter((group) => group.title === TARGET_TAB_GROUP_TITLE);
   if (!targetGroups.length) {
@@ -103,20 +137,213 @@ async function getActiveTab(): Promise<ActiveChromeTab> {
       return (a.index ?? 0) - (b.index ?? 0);
     });
 
-  const tab = tabs.at(-1);
+  return tabs;
+}
+
+async function getActiveTabInfo(): Promise<ActiveTabInfo> {
+  const tab = await getActiveTab();
+  return tabToInfo(tab, true);
+}
+
+async function listTabs(): Promise<BrowserTabList> {
+  const focusedTab = await getActiveTab();
+  const tabs = await getBraisedTabs();
+  return {
+    focusedTabId: focusedTab.id,
+    tabs: tabs.map((tab) => tabToInfo(tab, tab.id === focusedTab.id))
+  };
+}
+
+async function createTab(input: BrowserCreateTabInput = {}): Promise<BrowserTabInfo> {
+  const group = await getOrCreateBraisedGroup(input.url);
+  const url = normalizeOptionalUrl(input.url);
+  let tab: ActiveChromeTab;
+
+  if (group.createdTab) {
+    tab = group.createdTab;
+    if (url && tab.url !== url) {
+      tab = assertTabId(await chrome.tabs.update(tab.id, { url }));
+    }
+  } else {
+    tab = assertTabId(await chrome.tabs.create({
+      windowId: group.group.windowId,
+      url,
+      active: input.active ?? true
+    }));
+    await chrome.tabs.group({ groupId: group.group.id, tabIds: [tab.id] });
+  }
+
+  await setFocusedTabId(tab.id);
+  if (input.active !== false) {
+    await activateTab(tab.id, tab.windowId);
+  }
+
+  const refreshed = assertTabId(await chrome.tabs.get(tab.id));
+  return tabToInfo(refreshed, true);
+}
+
+async function openTab(input: BrowserOpenTabInput): Promise<BrowserTabInfo> {
+  if (!input || typeof input.url !== "string" || !input.url.trim()) {
+    throw new Error("browser.open_tab requires a non-empty url string");
+  }
+
+  const tab = input.tabId === undefined ? await getActiveTab() : await getBraisedTabById(input.tabId);
+  const updated = assertTabId(await chrome.tabs.update(tab.id, {
+    url: normalizeRequiredUrl(input.url),
+    active: input.active ?? tab.active
+  }));
+
+  await setFocusedTabId(updated.id);
+  if (input.active === true) {
+    await activateTab(updated.id, updated.windowId);
+  }
+
+  const refreshed = assertTabId(await chrome.tabs.get(updated.id));
+  return tabToInfo(refreshed, true);
+}
+
+async function closeTab(input: BrowserCloseTabInput = {}): Promise<BrowserTabList> {
+  const tab = input.tabId === undefined ? await getActiveTab() : await getBraisedTabById(input.tabId);
+  const focusedTabId = await getFocusedTabId();
+  await chrome.tabs.remove(tab.id);
+
+  const tabs = (await getBraisedTabs().catch(() => []))
+    .filter((candidate) => candidate.id !== tab.id);
+  const preservedFocus = tabs.find((candidate) => candidate.id === focusedTabId);
+  const nextTab = preservedFocus ?? tabs.at(Math.min(tab.index, Math.max(tabs.length - 1, 0))) ?? tabs.at(-1);
+  if (!nextTab) {
+    await chrome.storage.local.remove(FOCUSED_TAB_STORAGE_KEY);
+    return {
+      focusedTabId: -1,
+      tabs: []
+    };
+  }
+
+  await setFocusedTabId(nextTab.id);
+  return {
+    focusedTabId: nextTab.id,
+    tabs: tabs.map((candidate) => tabToInfo(candidate, candidate.id === nextTab.id))
+  };
+}
+
+async function switchTab(input: BrowserSwitchTabInput): Promise<BrowserTabInfo> {
+  if (!input || !Number.isInteger(input.tabId)) {
+    throw new Error("browser.switch_tab requires an integer tabId");
+  }
+
+  const tab = await getBraisedTabById(input.tabId);
+  await setFocusedTabId(tab.id);
+  if (input.activate !== false) {
+    await activateTab(tab.id, tab.windowId);
+  }
+
+  const refreshed = assertTabId(await chrome.tabs.get(tab.id));
+  return tabToInfo(refreshed, true);
+}
+
+function tabToInfo(tab: ActiveChromeTab, focused: boolean): BrowserTabInfo {
+  return {
+    tabId: tab.id,
+    title: tab.title ?? "",
+    url: tab.url ?? "",
+    windowId: tab.windowId,
+    index: tab.index,
+    active: tab.active,
+    focused
+  };
+}
+
+async function getFocusedTabId(): Promise<number | null> {
+  const stored = await chrome.storage.local.get(FOCUSED_TAB_STORAGE_KEY) as {
+    [FOCUSED_TAB_STORAGE_KEY]?: unknown;
+  };
+  return Number.isInteger(stored[FOCUSED_TAB_STORAGE_KEY])
+    ? stored[FOCUSED_TAB_STORAGE_KEY] as number
+    : null;
+}
+
+async function setFocusedTabId(tabId: number): Promise<void> {
+  await chrome.storage.local.set({ [FOCUSED_TAB_STORAGE_KEY]: tabId });
+}
+
+async function getBraisedTabById(tabId: number): Promise<ActiveChromeTab> {
+  if (!Number.isInteger(tabId)) {
+    throw new Error("tabId must be an integer");
+  }
+
+  const tabs = await getBraisedTabs();
+  const tab = tabs.find((candidate) => candidate.id === tabId);
   if (!tab) {
-    throw new Error(`Chrome tab group "${TARGET_TAB_GROUP_TITLE}" does not contain any pages`);
+    throw new Error(`Tab ${tabId} is not in the "${TARGET_TAB_GROUP_TITLE}" tab group`);
   }
 
   return tab;
 }
 
-async function getActiveTabInfo(): Promise<ActiveTabInfo> {
-  const tab = await getActiveTab();
+async function activateTab(tabId: number, windowId: number): Promise<void> {
+  await chrome.windows.update(windowId, { focused: true });
+  await chrome.tabs.update(tabId, { active: true });
+}
+
+async function getOrCreateBraisedGroup(
+  initialUrl?: string
+): Promise<{ group: chrome.tabGroups.TabGroup; createdTab?: ActiveChromeTab }> {
+  const groups = await chrome.tabGroups.query({});
+  const group = groups
+    .filter((candidate) => candidate.title === TARGET_TAB_GROUP_TITLE)
+    .sort((a, b) => {
+      if (a.windowId !== b.windowId) {
+        return a.windowId - b.windowId;
+      }
+      return a.id - b.id;
+    })
+    .at(-1);
+  if (group) {
+    return { group };
+  }
+
+  const createdTab = assertTabId(await chrome.tabs.create({
+    url: normalizeOptionalUrl(initialUrl),
+    active: true
+  }));
+  const groupId = await chrome.tabs.group({ tabIds: [createdTab.id] });
+  const createdGroup = await chrome.tabGroups.update(groupId, { title: TARGET_TAB_GROUP_TITLE });
+  if (!createdGroup) {
+    throw new Error(`Failed to create Chrome tab group "${TARGET_TAB_GROUP_TITLE}"`);
+  }
+
   return {
-    title: tab.title ?? "",
-    url: tab.url ?? ""
+    group: createdGroup,
+    createdTab
   };
+}
+
+function assertTabId(tab: chrome.tabs.Tab | undefined): ActiveChromeTab {
+  if (!tab || typeof tab.id !== "number") {
+    throw new Error("Chrome returned a tab without an id");
+  }
+  return tab as ActiveChromeTab;
+}
+
+function normalizeOptionalUrl(url: unknown): string | undefined {
+  if (url === undefined || url === null || url === "") {
+    return undefined;
+  }
+  if (typeof url !== "string") {
+    throw new Error("url must be a string when provided");
+  }
+  return normalizeRequiredUrl(url);
+}
+
+function normalizeRequiredUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    throw new Error("url must not be empty");
+  }
+  if (/^[a-z][a-z\d+.-]*:/i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
 }
 
 async function extractReadablePage(): Promise<ReadablePage> {

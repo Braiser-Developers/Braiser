@@ -3,7 +3,7 @@
   "name": "Braiser",
   "version": "0.1.0",
   "description": "A local safety and memory layer for AI browser agents.",
-  "permissions": ["activeTab", "debugger", "scripting", "storage", "tabGroups"],
+  "permissions": ["activeTab", "debugger", "scripting", "storage", "tabGroups", "tabs"],
   "host_permissions": [
     "ws://127.0.0.1:17832/*",
     "<all_urls>"
