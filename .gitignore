@@ -11,6 +11,7 @@ out/
 
 # Root-level debug exports
 /*.html
+downloads/
 
 # Logs
 *.log

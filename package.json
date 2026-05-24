@@ -8,6 +8,10 @@
     "build:extension": "tsc -p extension/tsconfig.json",
     "build:mcp": "tsc -p mcp/tsconfig.json",
     "check": "npm run build",
+    "cli": "node mcp/dist/cli.js",
+    "download:dom": "node mcp/dist/cli.js dom",
+    "download:observe": "node mcp/dist/cli.js observe",
+    "download:both": "node mcp/dist/cli.js both",
     "mcp": "node mcp/dist/server.js",
     "daemon": "node mcp/dist/daemon.js"
   },
