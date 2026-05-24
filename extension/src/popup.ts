@@ -100,9 +100,9 @@ async function downloadObservedOutput(): Promise<void> {
       type: "popup.get_observed_output"
     });
     downloadTextFile(
-      `${fileStamp()}-${snapshot.snapshotId}-observed-output.json`,
-      JSON.stringify(snapshot, null, 2),
-      "application/json"
+      `${fileStamp()}-${snapshot.snapshotId}-observed-output.html`,
+      snapshot.html,
+      "text/html"
     );
   } finally {
     setButtonBusy(downloadObserveButton, false);

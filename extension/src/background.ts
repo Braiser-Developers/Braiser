@@ -17,8 +17,7 @@ import {
 
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
 const TARGET_TAB_GROUP_TITLE = "Braised";
-const CDP_CLICKABLE_ATTRIBUTE = "data-braiser-cdp-clickable";
-const CDP_CLICKABLE_VALUE = "true";
+const CDP_BRIDGE_GLOBAL = "__braiserCdpBridge";
 
 interface CdpSnapshotResult {
   documents?: Array<{
@@ -30,6 +29,37 @@ interface CdpSnapshotResult {
       nodeType?: number[];
     };
   }>;
+}
+
+interface CdpExecutionContextDescription {
+  id: number;
+  name?: string;
+  origin?: string;
+  auxData?: {
+    frameId?: string;
+    isDefault?: boolean;
+    type?: string;
+  };
+}
+
+interface CdpEvaluateResult {
+  result?: {
+    type?: string;
+    value?: unknown;
+    objectId?: string;
+  };
+}
+
+interface CdpResolveNodeResult {
+  object?: {
+    objectId?: string;
+  };
+}
+
+interface CdpCallFunctionResult {
+  result?: {
+    value?: unknown;
+  };
 }
 
 async function handleExtensionRequest(request: ExtensionRequest): Promise<unknown> {
@@ -97,16 +127,12 @@ async function observePage(): Promise<AgentHtmlSnapshot> {
   const tab = await getActiveTab();
   await ensureContentScript(tab.id);
 
-  const cdpClickableMarkedCount = await markCdpClickableElements(tab.id);
-  const backgroundMarkerDomCount = await countCdpClickableMarkers(tab.id);
-  try {
-    return sendContentRequestToTab<AgentHtmlSnapshot>(tab.id, "browser.observe", {
-      cdpClickableMarkedCount,
-      backgroundMarkerDomCount
-    });
-  } finally {
-    await clearCdpClickableMarkers(tab.id);
-  }
+  const bridgeRunId = createBridgeRunId();
+  const cdpRegisteredCount = await registerCdpClickableElements(tab.id, bridgeRunId);
+  return sendContentRequestToTab<AgentHtmlSnapshot>(tab.id, "browser.observe", {
+    bridgeRunId,
+    cdpRegisteredCount
+  });
 }
 
 async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
@@ -165,10 +191,14 @@ async function sendDebugCdpCommand(input: DebugCdpCommandInput): Promise<DebugCd
   };
 }
 
-async function markCdpClickableElements(tabId: number): Promise<number> {
+async function registerCdpClickableElements(tabId: number, bridgeRunId: string): Promise<number> {
   try {
     return await withDebuggerSession(tabId, async (target) => {
-      await chrome.debugger.sendCommand(target, "DOM.getDocument", { depth: 0 });
+      const contextId = await findCdpBridgeContextId(target);
+      if (!contextId) {
+        return 0;
+      }
+
       const snapshot = await chrome.debugger.sendCommand(
         target,
         "DOMSnapshot.captureSnapshot",
@@ -178,7 +208,7 @@ async function markCdpClickableElements(tabId: number): Promise<number> {
       const clickableIndexes = nodes?.isClickable?.index ?? [];
       const backendNodeIds = nodes?.backendNodeId ?? [];
       const nodeTypes = nodes?.nodeType ?? [];
-      let markedCount = 0;
+      let registeredCount = 0;
 
       for (const nodeIndex of clickableIndexes) {
         if (nodeTypes[nodeIndex] !== 1) {
@@ -190,12 +220,12 @@ async function markCdpClickableElements(tabId: number): Promise<number> {
           continue;
         }
 
-        if (await setCdpBackendNodeAttribute(target, backendNodeId)) {
-          markedCount++;
+        if (await registerCdpBackendNode(target, backendNodeId, contextId, bridgeRunId)) {
+          registeredCount++;
         }
       }
 
-      return markedCount;
+      return registeredCount;
     });
   } catch {
     // CDP clickability is a best-effort supplement; base observe should still work.
@@ -203,54 +233,98 @@ async function markCdpClickableElements(tabId: number): Promise<number> {
   }
 }
 
-async function setCdpBackendNodeAttribute(
-  target: chrome.debugger.Debuggee,
-  backendNodeId: number
-): Promise<boolean> {
-  try {
-    const pushed = await chrome.debugger.sendCommand(
-      target,
-      "DOM.pushNodesByBackendIdsToFrontend",
-      { backendNodeIds: [backendNodeId] }
-    ) as {
-      nodeIds?: number[];
-    };
-    const nodeId = pushed.nodeIds?.[0];
-    if (!nodeId) {
-      return false;
+async function findCdpBridgeContextId(
+  target: chrome.debugger.Debuggee
+): Promise<number | null> {
+  const contexts: CdpExecutionContextDescription[] = [];
+  const onEvent = (
+    source: chrome.debugger.Debuggee,
+    method: string,
+    params?: unknown
+  ) => {
+    if (source.tabId !== target.tabId || method !== "Runtime.executionContextCreated") {
+      return;
     }
 
-    await chrome.debugger.sendCommand(target, "DOM.setAttributeValue", {
-      nodeId,
-      name: CDP_CLICKABLE_ATTRIBUTE,
-      value: CDP_CLICKABLE_VALUE
-    });
-    return true;
+    const context = (params as { context?: CdpExecutionContextDescription } | undefined)?.context;
+    if (typeof context?.id === "number") {
+      contexts.push(context);
+    }
+  };
+
+  chrome.debugger.onEvent.addListener(onEvent);
+  try {
+    await chrome.debugger.sendCommand(target, "Runtime.enable");
+    await delay(50);
+
+    const isolatedContexts = contexts.filter((context) => context.auxData?.isDefault === false);
+    const candidates = isolatedContexts.length ? isolatedContexts : contexts;
+    for (const context of candidates) {
+      if (await isCdpBridgeContext(target, context.id)) {
+        return context.id;
+      }
+    }
+
+    return null;
+  } finally {
+    chrome.debugger.onEvent.removeListener(onEvent);
+  }
+}
+
+async function isCdpBridgeContext(
+  target: chrome.debugger.Debuggee,
+  contextId: number
+): Promise<boolean> {
+  try {
+    const result = await chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+      expression: `globalThis.${CDP_BRIDGE_GLOBAL}?.version === 1`,
+      contextId,
+      returnByValue: true,
+      silent: true
+    }) as CdpEvaluateResult;
+
+    return result.result?.value === true;
   } catch {
     return false;
   }
 }
 
-async function clearCdpClickableMarkers(tabId: number): Promise<void> {
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (attributeName: string) => {
-      document.querySelectorAll(`[${attributeName}]`).forEach((element) => {
-        element.removeAttribute(attributeName);
-      });
-    },
-    args: [CDP_CLICKABLE_ATTRIBUTE]
-  }).catch(() => undefined);
-}
+async function registerCdpBackendNode(
+  target: chrome.debugger.Debuggee,
+  backendNodeId: number,
+  executionContextId: number,
+  bridgeRunId: string
+): Promise<boolean> {
+  let objectId: string | undefined;
+  try {
+    const resolved = await chrome.debugger.sendCommand(
+      target,
+      "DOM.resolveNode",
+      { backendNodeId, executionContextId }
+    ) as CdpResolveNodeResult;
+    objectId = resolved.object?.objectId;
+    if (!objectId) {
+      return false;
+    }
 
-async function countCdpClickableMarkers(tabId: number): Promise<number> {
-  const [result] = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: (attributeName: string) => document.querySelectorAll(`[${attributeName}]`).length,
-    args: [CDP_CLICKABLE_ATTRIBUTE]
-  });
-
-  return typeof result?.result === "number" ? result.result : 0;
+    const registration = await chrome.debugger.sendCommand(target, "Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: `function(runId) {
+        return globalThis.${CDP_BRIDGE_GLOBAL}?.registerElement(runId, this) === true;
+      }`,
+      arguments: [{ value: bridgeRunId }],
+      returnByValue: true,
+      silent: true
+    }) as CdpCallFunctionResult;
+    return registration.result?.value === true;
+  } catch {
+    return false;
+  } finally {
+    if (objectId) {
+      await chrome.debugger.sendCommand(target, "Runtime.releaseObject", { objectId })
+        .catch(() => undefined);
+    }
+  }
 }
 
 async function withDebuggerSession<T>(
@@ -269,6 +343,16 @@ async function withDebuggerSession<T>(
       await chrome.debugger.detach(target).catch(() => undefined);
     }
   }
+}
+
+function createBridgeRunId(): string {
+  return `cdp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T> {

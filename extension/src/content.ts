@@ -17,8 +17,8 @@ interface AgentHtmlSnapshot {
 }
 
 interface ObserveInput {
-  cdpClickableMarkedCount?: number;
-  backgroundMarkerDomCount?: number;
+  bridgeRunId?: string;
+  cdpRegisteredCount?: number;
 }
 
 type BrowserActAction =
@@ -56,11 +56,22 @@ interface RegistryState {
   elements: Map<string, Element>;
 }
 
+interface CdpBridgeRun {
+  createdAt: number;
+  elements: Element[];
+}
+
+interface CdpBridge {
+  version: 1;
+  registerElement: (runId: string, element: unknown) => boolean;
+}
+
 {
 const GLOBAL_KEY = "__braiserContentState";
+const CDP_BRIDGE_KEY = "__braiserCdpBridge";
 const MAX_TEXT_LENGTH = 120;
 const MAX_AGENT_HTML_LENGTH = 60000;
-const CDP_CLICKABLE_ATTRIBUTE = "data-braiser-cdp-clickable";
+const CDP_BRIDGE_RUN_TTL_MS = 30_000;
 const INTERACTIVE_SELECTOR = [
   "a[href]",
   "button",
@@ -79,8 +90,7 @@ const INTERACTIVE_SELECTOR = [
   "[tabindex='0']",
   "[aria-haspopup]",
   "[aria-expanded]",
-  "[onclick]",
-  `[${CDP_CLICKABLE_ATTRIBUTE}='true']`
+  "[onclick]"
 ].join(",");
 
 const SEMANTIC_TAGS = new Set([
@@ -132,18 +142,41 @@ const globalState = globalThis as typeof globalThis & {
     listenerInstalled: boolean;
     registry: RegistryState | null;
     nextSnapshotNumber: number;
+    cdpBridgeRuns: Map<string, CdpBridgeRun>;
   };
+  [CDP_BRIDGE_KEY]?: CdpBridge;
 };
 
 if (!globalState[GLOBAL_KEY]) {
   globalState[GLOBAL_KEY] = {
     listenerInstalled: false,
     registry: null,
-    nextSnapshotNumber: 1
+    nextSnapshotNumber: 1,
+    cdpBridgeRuns: new Map()
   };
+} else if (!globalState[GLOBAL_KEY].cdpBridgeRuns) {
+  globalState[GLOBAL_KEY].cdpBridgeRuns = new Map();
 }
 
 const state = globalState[GLOBAL_KEY];
+
+globalState[CDP_BRIDGE_KEY] = {
+  version: 1,
+  registerElement(runId: string, element: unknown): boolean {
+    pruneCdpBridgeRuns();
+    if (!runId || !(element instanceof Element)) {
+      return false;
+    }
+
+    const run = state.cdpBridgeRuns.get(runId) ?? {
+      createdAt: Date.now(),
+      elements: []
+    };
+    run.elements.push(element);
+    state.cdpBridgeRuns.set(runId, run);
+    return true;
+  }
+};
 
 if (!state.listenerInstalled) {
   chrome.runtime.onMessage.addListener((message: ContentRequest, _sender, sendResponse) => {
@@ -213,18 +246,22 @@ function extractReadablePage(): ReadablePage {
 }
 
 function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
+  pruneCdpBridgeRuns();
   const snapshotId = `S${state.nextSnapshotNumber++}`;
   const registry: RegistryState = {
     snapshotId,
     elements: new Map()
   };
 
-  const interactiveElements = collectInteractiveElements();
-  const cdpMarkedCount = document.querySelectorAll(
-    `[${CDP_CLICKABLE_ATTRIBUTE}='true']`
-  ).length;
+  const localInteractiveElements = collectInteractiveElements();
+  const cdpInteractiveElements = consumeCdpBridgeElements(input.bridgeRunId);
+  const interactiveElements = dedupeElements([
+    ...localInteractiveElements,
+    ...cdpInteractiveElements
+  ]).filter((element) => isElementCandidate(element) && isVisible(element));
+  const interactiveElementSet = new Set(interactiveElements);
   const keptElements = collectKeptElements(interactiveElements);
-  const bodyHtml = serializeChildren(document.body, keptElements, registry);
+  const bodyHtml = serializeChildren(document.body, keptElements, interactiveElementSet, registry);
   const pageOpen = `<page snapshot="${escapeAttribute(snapshotId)}" title="${escapeAttribute(document.title)}" url="${escapeAttribute(window.location.href)}">`;
   let html = `${pageOpen}\n${bodyHtml}\n</page>`;
   let truncated = false;
@@ -244,11 +281,11 @@ function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
       elementCount: registry.elements.size,
       truncated,
       debug: {
-        backgroundCdpMarkedCount: input.cdpClickableMarkedCount ?? null,
-        backgroundMarkerDomCount: input.backgroundMarkerDomCount ?? null,
-        contentCdpMarkedCount: cdpMarkedCount,
-        interactiveCandidateCount: interactiveElements.length,
-        selectorHasCdpClickable: INTERACTIVE_SELECTOR.includes(CDP_CLICKABLE_ATTRIBUTE)
+        bridgeRunId: input.bridgeRunId ?? null,
+        backgroundCdpRegisteredCount: input.cdpRegisteredCount ?? null,
+        contentCdpReceivedCount: cdpInteractiveElements.length,
+        localInteractiveCandidateCount: localInteractiveElements.length,
+        interactiveCandidateCount: interactiveElements.length
       }
     }
   };
@@ -261,11 +298,11 @@ function assertObserveInput(payload: unknown): ObserveInput {
 
   const input = payload as Partial<ObserveInput>;
   return {
-    cdpClickableMarkedCount: typeof input.cdpClickableMarkedCount === "number"
-      ? input.cdpClickableMarkedCount
+    bridgeRunId: typeof input.bridgeRunId === "string"
+      ? input.bridgeRunId
       : undefined,
-    backgroundMarkerDomCount: typeof input.backgroundMarkerDomCount === "number"
-      ? input.backgroundMarkerDomCount
+    cdpRegisteredCount: typeof input.cdpRegisteredCount === "number"
+      ? input.cdpRegisteredCount
       : undefined
   };
 }
@@ -273,6 +310,29 @@ function assertObserveInput(payload: unknown): ObserveInput {
 function collectInteractiveElements(): Element[] {
   return Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))
     .filter((element) => isElementCandidate(element) && isVisible(element));
+}
+
+function consumeCdpBridgeElements(runId: string | undefined): Element[] {
+  if (!runId) {
+    return [];
+  }
+
+  const elements = state.cdpBridgeRuns.get(runId)?.elements ?? [];
+  state.cdpBridgeRuns.delete(runId);
+  return elements;
+}
+
+function pruneCdpBridgeRuns(): void {
+  const cutoff = Date.now() - CDP_BRIDGE_RUN_TTL_MS;
+  for (const [runId, run] of state.cdpBridgeRuns) {
+    if (run.createdAt < cutoff) {
+      state.cdpBridgeRuns.delete(runId);
+    }
+  }
+}
+
+function dedupeElements(elements: Element[]): Element[] {
+  return Array.from(new Set(elements));
 }
 
 function isElementCandidate(element: Element): boolean {
@@ -320,12 +380,13 @@ function isMeaningfulAncestor(element: Element): boolean {
 function serializeChildren(
   parent: Element,
   keptElements: Set<Element>,
+  interactiveElements: Set<Element>,
   registry: RegistryState
 ): string {
   const parts: string[] = [];
 
   for (const child of Array.from(parent.children)) {
-    const serialized = serializeElement(child, keptElements, registry, 1);
+    const serialized = serializeElement(child, keptElements, interactiveElements, registry, 1);
     if (serialized) {
       parts.push(serialized);
     }
@@ -337,6 +398,7 @@ function serializeChildren(
 function serializeElement(
   element: Element,
   keptElements: Set<Element>,
+  interactiveElements: Set<Element>,
   registry: RegistryState,
   depth: number
 ): string {
@@ -346,13 +408,13 @@ function serializeElement(
 
   if (!keptElements.has(element)) {
     return Array.from(element.children)
-      .map((child) => serializeElement(child, keptElements, registry, depth))
+      .map((child) => serializeElement(child, keptElements, interactiveElements, registry, depth))
       .filter(Boolean)
       .join("\n");
   }
 
   const tagName = element.tagName.toLowerCase();
-  const elementId = isElementCandidate(element) && element.matches(INTERACTIVE_SELECTOR)
+  const elementId = interactiveElements.has(element)
     ? `E${registry.elements.size + 1}`
     : "";
 
@@ -363,7 +425,7 @@ function serializeElement(
   const attributes = serializeAttributes(element, elementId);
   const text = directText(element);
   const childParts = Array.from(element.children)
-    .map((child) => serializeElement(child, keptElements, registry, depth + 1))
+    .map((child) => serializeElement(child, keptElements, interactiveElements, registry, depth + 1))
     .filter(Boolean);
 
   if (!elementId && !text && childParts.length === 0) {
