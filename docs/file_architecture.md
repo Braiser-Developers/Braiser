@@ -8,8 +8,10 @@
 Braiser/
   extension/
   mcp/
+  scripts/
   docs/
   package.json
+  requirements-markdown.txt
   package-lock.json
   LICENSE
   .gitignore
@@ -248,6 +250,16 @@ MCP/daemon 侧共享类型定义。
 
 本地 MCP 和 daemon 的构建产物目录，由 TypeScript 编译生成，不应手动编辑。
 
+## `scripts/`
+
+项目本地辅助脚本目录，不由 Chrome 直接加载。
+
+- `setup-markdown.mjs`：创建 `.venv-markdown/`，并安装 `requirements-markdown.txt`。
+- `preprocess-markdown-html.py`：在 Markdown 转换前规范化运行时 DOM HTML，将带 annotation 的 KaTeX 节点替换为 Braiser 标记的数学节点。
+- `markitdown-braiser.py`：包装固定版本的 MarkItDown HTML 转换流程，并让 Braiser 标记的数学节点避开 markdownify 的普通文本转义。
+
+这些脚本的接口协议记录在 `docs/markdown_pipeline.md`。
+
 ## `docs/`
 
 项目文档目录。
@@ -256,6 +268,7 @@ MCP/daemon 侧共享类型定义。
 - `mvp_architecture.md`：当前 MVP 架构说明。
 - `file_architecture.md`：当前文件结构和职责说明。
 - `code_design_guidelines.md`：代码完成后的设计自查规则。
+- `markdown_pipeline.md`：HTML normalization 和 Markdown conversion 的接口协议。
 - `todo/`：待实现或讨论中的功能设计草稿。
 
 ## 根目录 `package.json`

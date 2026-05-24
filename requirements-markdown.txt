@@ -1,0 +1,2 @@
+markitdown==0.1.5
+beautifulsoup4==4.14.3

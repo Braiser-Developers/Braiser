@@ -40,6 +40,35 @@ Chrome 扩展 debug bridge
 npm install
 ```
 
+### Markdown conversion setup
+
+Markdown export uses Microsoft MarkItDown from a project-local Python virtual environment.
+Run this once after `npm install`:
+
+```powershell
+npm run setup:markdown
+```
+
+This creates `.venv-markdown/` and installs packages from `requirements-markdown.txt`.
+Braiser preprocesses KaTeX annotations into marked math nodes before handing the HTML to a
+project-local MarkItDown wrapper, so math text is preserved instead of being escaped as
+ordinary Markdown text.
+
+Markdown export can be run with:
+
+```powershell
+npm run download:markdown
+```
+
+To inspect the preprocessed HTML before Markdown conversion, run:
+
+```powershell
+npm run download:preprocessed-html
+```
+
+The normalization and conversion contract is documented in
+`docs/markdown_pipeline.md`.
+
 ## 构建
 
 ```powershell

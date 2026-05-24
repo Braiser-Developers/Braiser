@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ExtensionBridge } from "./websocket.js";
 import type { ActiveTabInfo, AgentHtmlSnapshot, ReadablePage } from "./protocol.js";
 
-type DownloadTarget = "dom" | "observe" | "both";
+type DownloadTarget = "dom" | "observe" | "both" | "markdown" | "preprocessed-html";
 
-const DOWNLOADS_DIR = path.resolve(projectRoot(), "downloads");
+interface ProcessResult {
+  code: number | null;
+  stderr: string;
+  notFound: boolean;
+}
+
+const PROJECT_ROOT = projectRoot();
+const DOWNLOADS_DIR = path.resolve(PROJECT_ROOT, "downloads");
+const MARKDOWN_VENV_DIR = path.join(PROJECT_ROOT, ".venv-markdown");
 
 const bridge = new ExtensionBridge();
 
@@ -23,7 +32,7 @@ try {
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  console.error("Usage: npm run cli -- dom|observe|both");
+  console.error("Usage: npm run cli -- dom|observe|both|markdown|preprocessed-html");
   process.exitCode = 1;
 } finally {
   bridge.close();
@@ -31,8 +40,22 @@ try {
 
 function parseTarget(args: string[]): DownloadTarget {
   const target = args[0] ?? "both";
-  if (target === "dom" || target === "observe" || target === "both") {
+  if (
+    target === "dom" ||
+    target === "observe" ||
+    target === "both" ||
+    target === "markdown" ||
+    target === "preprocessed-html"
+  ) {
     return target;
+  }
+
+  if (target === "md") {
+    return "markdown";
+  }
+
+  if (target === "debug-html" || target === "katex-html") {
+    return "preprocessed-html";
   }
 
   throw new Error(`Unsupported download target: ${target}`);
@@ -50,6 +73,14 @@ async function downloadTarget(
 
   if (target === "observe" || target === "both") {
     savedFiles.push(await downloadObservedOutput(bridge));
+  }
+
+  if (target === "markdown") {
+    savedFiles.push(await downloadMarkdown(bridge));
+  }
+
+  if (target === "preprocessed-html") {
+    savedFiles.push(await downloadPreprocessedHtml(bridge));
   }
 
   return savedFiles;
@@ -71,11 +102,163 @@ async function downloadObservedOutput(bridge: ExtensionBridge): Promise<string> 
   return writeDownload(fileName, snapshot.html);
 }
 
+async function downloadMarkdown(bridge: ExtensionBridge): Promise<string> {
+  const page = await bridge.request<ReadablePage>("page.extract_readable_text", undefined, 30000);
+  const stamp = fileStamp();
+  const pageName = slugify(hostFromUrl(page.url) || page.title);
+  const tempHtmlPath = path.join(DOWNLOADS_DIR, `${stamp}-${pageName}.markitdown-input.html`);
+  const preprocessedHtmlPath = path.join(DOWNLOADS_DIR, `${stamp}-${pageName}.markitdown-preprocessed.html`);
+  const markdownPath = path.join(DOWNLOADS_DIR, `${stamp}-${pageName}-runtime-dom.md`);
+
+  await mkdir(DOWNLOADS_DIR, { recursive: true });
+  await writeFile(tempHtmlPath, page.html, "utf8");
+
+  try {
+    await preprocessHtmlForMarkdown(tempHtmlPath, preprocessedHtmlPath);
+    await convertHtmlToMarkdown(preprocessedHtmlPath, markdownPath);
+  } finally {
+    await Promise.all([
+      rm(tempHtmlPath, { force: true }),
+      rm(preprocessedHtmlPath, { force: true })
+    ]);
+  }
+
+  return markdownPath;
+}
+
+async function downloadPreprocessedHtml(bridge: ExtensionBridge): Promise<string> {
+  const page = await bridge.request<ReadablePage>("page.extract_readable_text", undefined, 30000);
+  const stamp = fileStamp();
+  const pageName = slugify(hostFromUrl(page.url) || page.title);
+  const tempHtmlPath = path.join(DOWNLOADS_DIR, `${stamp}-${pageName}.markitdown-input.html`);
+  const preprocessedHtmlPath = path.join(DOWNLOADS_DIR, `${stamp}-${pageName}-runtime-dom-preprocessed.html`);
+
+  await mkdir(DOWNLOADS_DIR, { recursive: true });
+  await writeFile(tempHtmlPath, page.html, "utf8");
+
+  try {
+    await preprocessHtmlForMarkdown(tempHtmlPath, preprocessedHtmlPath);
+  } finally {
+    await rm(tempHtmlPath, { force: true });
+  }
+
+  return preprocessedHtmlPath;
+}
+
 async function writeDownload(fileName: string, content: string): Promise<string> {
   await mkdir(DOWNLOADS_DIR, { recursive: true });
   const filePath = path.join(DOWNLOADS_DIR, fileName);
   await writeFile(filePath, content, "utf8");
   return filePath;
+}
+
+async function convertHtmlToMarkdown(inputPath: string, outputPath: string): Promise<void> {
+  const scriptPath = path.join(PROJECT_ROOT, "scripts", "markitdown-braiser.py");
+  const attempts = markdownPythonAttempts([
+    scriptPath,
+    inputPath,
+    outputPath
+  ]);
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    const result = await runProcess(attempt.command, attempt.args);
+    if (result.code === 0) {
+      return;
+    }
+
+    if (!result.notFound) {
+      errors.push(`${attempt.command}: ${result.stderr || `exit code ${result.code}`}`);
+    }
+  }
+
+  const details = errors.length ? `\n${errors.join("\n")}` : "";
+  throw new Error(
+    `Braiser Markdown conversion is not available. Run "npm run setup:markdown" and try again.${details}`
+  );
+}
+
+async function preprocessHtmlForMarkdown(inputPath: string, outputPath: string): Promise<void> {
+  const scriptPath = path.join(PROJECT_ROOT, "scripts", "preprocess-markdown-html.py");
+  const attempts = markdownPythonAttempts([
+    scriptPath,
+    inputPath,
+    outputPath
+  ]);
+  const errors: string[] = [];
+
+  for (const attempt of attempts) {
+    const result = await runProcess(attempt.command, attempt.args);
+    if (result.code === 0) {
+      return;
+    }
+
+    if (!result.notFound) {
+      errors.push(`${attempt.command}: ${result.stderr || `exit code ${result.code}`}`);
+    }
+  }
+
+  const details = errors.length ? `\n${errors.join("\n")}` : "";
+  throw new Error(
+    `Unable to preprocess HTML for Markdown. Run "npm run setup:markdown" and try again.${details}`
+  );
+}
+
+function markdownPythonAttempts(args: string[]): Array<{ command: string; args: string[] }> {
+  const pythonPath = process.platform === "win32"
+    ? path.join(MARKDOWN_VENV_DIR, "Scripts", "python.exe")
+    : path.join(MARKDOWN_VENV_DIR, "bin", "python");
+  const attempts: Array<{ command: string; args: string[] }> = [];
+
+  if (existsSync(pythonPath)) {
+    attempts.push({ command: pythonPath, args });
+  }
+
+  attempts.push(
+    { command: "py", args: ["-3", ...args] },
+    { command: "python", args },
+    { command: "python3", args }
+  );
+
+  return attempts;
+}
+
+function runProcess(command: string, args: string[]): Promise<ProcessResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: ProcessResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+
+    const child = spawn(command, args, {
+      windowsHide: true
+    });
+    let stderr = "";
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      settle({
+        code: null,
+        stderr: error.message,
+        notFound: error.code === "ENOENT"
+      });
+    });
+
+    child.on("close", (code) => {
+      settle({
+        code,
+        stderr: stderr.trim(),
+        notFound: false
+      });
+    });
+  });
 }
 
 async function ensureExtensionConnected(bridge: ExtensionBridge): Promise<void> {
