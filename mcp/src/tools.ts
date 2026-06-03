@@ -20,7 +20,7 @@ import type {
   DebugInjectJsResult,
   ReadablePage
 } from "./protocol.js";
-import { cleanReadablePage } from "./cleaner.js";
+import { readablePageToMarkdown } from "./markdown.js";
 import { savePage } from "./storage.js";
 
 export const tools: Tool[] = [
@@ -155,7 +155,7 @@ export const tools: Tool[] = [
   },
   {
     name: "browser.observe",
-    description: "Observe the current agent focus tab in the Braised tab group and return compressed agent-html with data-eid handles for interactive elements.",
+    description: "Observe the current agent focus tab in the Braised tab group and return full DOM-derived agent-html with data-eid handles for interactive elements.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -244,7 +244,7 @@ export const tools: Tool[] = [
   },
   {
     name: "page.extract_readable_text",
-    description: "Extract readable text from the current agent focus tab in the Braised tab group.",
+    description: "Extract the current agent focus tab in the Braised tab group and return Markdown in the text field.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -450,7 +450,12 @@ function assertDebugInjectJsInput(args: Record<string, unknown>): DebugInjectJsI
 
 async function extractReadableText(bridge: ExtensionBridge): Promise<CleanPage> {
   const page = await bridge.request<ReadablePage>("page.extract_readable_text");
-  return cleanReadablePage(page);
+  const markdown = await readablePageToMarkdown(page);
+  return {
+    title: normalizeWhitespace(page.title),
+    url: page.url,
+    text: markdown
+  };
 }
 
 async function saveCurrentPage(bridge: ExtensionBridge): Promise<CleanPage & { filePath: string }> {
@@ -460,4 +465,8 @@ async function saveCurrentPage(bridge: ExtensionBridge): Promise<CleanPage & { f
     ...page,
     filePath
   };
+}
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }

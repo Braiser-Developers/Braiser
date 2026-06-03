@@ -4,7 +4,7 @@
 
 先验证一个核心价值：
 
-> 本地 Agent 能通过 MCP 读取浏览器中受控目标页面的 DOM、可读文本和可交互元素，并能执行小范围页面操作。
+> 本地 Agent 能通过 MCP 读取浏览器中受控目标页面的 DOM、Markdown 正文和可交互元素，并能执行小范围页面操作。
 
 当前目标页面不是 Chrome active tab，而是标题为 `Braised` 的 Chrome tab group 里的 agent focus tab。这个焦点由 Braiser 维护，初次使用或焦点失效时回退到该组最后一个 tab。这样用户可以显式划定 Agent 可访问的浏览器区域，同时允许 Agent 在受控组内管理多个页面。
 
@@ -95,7 +95,7 @@ Chrome Extension debug bridge
 12. braiser-mcp 将结果返回给 Agent
 ```
 
-`browser.observe` 走同一条链路，但返回压缩后的 agent-html 和 `data-eid`。`browser.act` 使用最近一次 observe 快照中的 `snapshotId` 和 `elementId` 在页面内执行受控动作。
+`browser.observe` 走同一条链路，但返回包含页面 DOM 结构的 agent-html 和 `data-eid`。`browser.act` 使用最近一次 observe 快照中的 `snapshotId` 和 `elementId` 在页面内执行受控动作。
 observe 的可交互元素集合以 DOM/ARIA 规则为基础，并用 CDP `DOMSnapshot.captureSnapshot` 的 `isClickable` 信号补充普通 selector 难以发现的委托点击元素。
 CDP 只负责发现和桥接节点：background 在同一个 CDP session 中通过 `Runtime.enable` 找到 content script isolated world，再用 `DOM.resolveNode` 将 clickable 节点的 `backendNodeId` 解析为该 world 中的 JS node wrapper，随后用 `Runtime.callFunctionOn` 调用 content script 的固定 bridge 函数。content script 保存精确 DOM Element、合并本地 selector 结果并生成 observe registry；这条路径不向真实 DOM 写临时属性。
 
@@ -111,6 +111,7 @@ browser.create_tab
 browser.open_tab
 browser.close_tab
 browser.switch_tab
+browser.download
 browser.observe
 browser.act
 debug.inject_js
@@ -173,9 +174,13 @@ page.save_current_page
 
 将 agent focus 切换到 `Braised` tab group 中的指定 tab；默认也会让 Chrome 视觉上激活该 tab。
 
+### `browser.download`
+
+通过 Chrome 原生下载管理器下载 URL 到浏览器默认下载目录。相对 URL 会基于当前 agent focus tab 解析；可选传入默认下载目录下的文件名。
+
 ### `page.extract_readable_text`
 
-抽取目标页面的可读文本。
+抽取目标页面运行时 DOM，并复用 `npm run download:md` 的 Markdown pipeline，在返回对象的 `text` 字段中提供 Markdown。
 
 返回示例：
 
@@ -199,10 +204,15 @@ page.save_current_page
 
 ### `browser.observe`
 
-观察目标页面，返回压缩后的 agent-html。
+观察目标页面，返回包含页面 DOM 结构的 agent-html。
 
-agent-html 会保留可交互元素及其必要上下文，并为可操作元素分配 `data-eid`。
+agent-html 会遍历 `document.body` 中未丢弃的 DOM 节点，并为可操作元素分配 `data-eid`。
 可交互元素来源包括标准表单/链接/按钮/ARIA 规则，以及 CDP `isClickable` 桥接注册的元素。
+observe 先把 DOM 转成内部 AgentNode 树，只保留少量面向 Agent 有用的属性，并丢弃 `script`、`style`、`link`、`meta`、`svg` 和 `path`。
+随后在树结构上做简化：无属性、非交互的 `div` 和 `span` 会作为透明 wrapper，无内容则删除，只有纯文本则输出文本，只有一个有效子节点则折叠为子节点，多行纯文本保留为多行文本；连续的单行纯文本会合并为空格分隔的一行。
+`data-eid` 在树简化后分配，因此 registry 只记录最终输出中真实存在的可交互元素。
+最后统一渲染 agent-html；缩进只在渲染阶段生成，每层两个空格，并按 12 个空格取模循环，以减少深层 DOM 的空白开销。
+文本和过长 URL 会截断，整段 agent-html 超过上限时会截断并设置 `meta.truncated`。
 `meta.debug` 当前包含 CDP bridge 链路的诊断计数，例如 bridge run id、background 注册数、content 收到数和候选元素数。
 
 返回示例：

@@ -66,12 +66,36 @@ interface CdpBridge {
   registerElement: (runId: string, element: unknown) => boolean;
 }
 
+interface AgentAttribute {
+  name: string;
+  value: string;
+}
+
+interface AgentTextNode {
+  kind: "text";
+  text: string;
+  flow: "inline" | "line";
+}
+
+interface AgentElementNode {
+  kind: "element";
+  tagName: string;
+  attributes: AgentAttribute[];
+  children: AgentNode[];
+  interactive: boolean;
+  sourceElement: Element;
+}
+
+type AgentNode = AgentTextNode | AgentElementNode;
+
 {
 const GLOBAL_KEY = "__braiserContentState";
 const CDP_BRIDGE_KEY = "__braiserCdpBridge";
 const MAX_TEXT_LENGTH = 120;
-const MAX_AGENT_HTML_LENGTH = 60000;
+const MAX_AGENT_HTML_LENGTH = 300000;
 const CDP_BRIDGE_RUN_TTL_MS = 30_000;
+const INDENT_UNIT = "  ";
+const INDENT_RESET_DEPTH = 6;
 const INTERACTIVE_SELECTOR = [
   "a[href]",
   "button",
@@ -92,31 +116,6 @@ const INTERACTIVE_SELECTOR = [
   "[aria-expanded]",
   "[onclick]"
 ].join(",");
-
-const SEMANTIC_TAGS = new Set([
-  "header",
-  "nav",
-  "main",
-  "aside",
-  "footer",
-  "section",
-  "article",
-  "form",
-  "dialog",
-  "menu",
-  "ul",
-  "ol",
-  "li",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "td",
-  "th",
-  "fieldset",
-  "label",
-  "p"
-]);
 
 const KEPT_ATTRIBUTES = [
   "href",
@@ -159,6 +158,10 @@ if (!globalState[GLOBAL_KEY]) {
 }
 
 const state = globalState[GLOBAL_KEY];
+
+// ---------------------------------------------------------------------------
+// Content script bridge
+// ---------------------------------------------------------------------------
 
 globalState[CDP_BRIDGE_KEY] = {
   version: 1,
@@ -208,6 +211,10 @@ async function handleContentRequest(message: ContentRequest): Promise<unknown> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Readable page extraction
+// ---------------------------------------------------------------------------
+
 function getVisibleText(): string {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -245,6 +252,11 @@ function extractReadablePage(): ReadablePage {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Observe: DOM -> AgentNode tree -> simplified tree -> agent-html
+// ---------------------------------------------------------------------------
+
+// Keep docs/mvp_architecture.md browser.observe algorithm notes in sync when changing observe filtering or serialization.
 function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
   pruneCdpBridgeRuns();
   const snapshotId = `S${state.nextSnapshotNumber++}`;
@@ -260,8 +272,10 @@ function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
     ...cdpInteractiveElements
   ]).filter((element) => isElementCandidate(element) && isVisible(element));
   const interactiveElementSet = new Set(interactiveElements);
-  const keptElements = collectKeptElements(interactiveElements);
-  const bodyHtml = serializeChildren(document.body, keptElements, interactiveElementSet, registry);
+  const bodyNodes = buildAgentChildren(document.body, interactiveElementSet);
+  const simplifiedNodes = simplifyAgentNodes(bodyNodes);
+  assignElementIds(simplifiedNodes, registry);
+  const bodyHtml = renderAgentNodes(simplifiedNodes);
   const pageOpen = `<page snapshot="${escapeAttribute(snapshotId)}" title="${escapeAttribute(document.title)}" url="${escapeAttribute(window.location.href)}">`;
   let html = `${pageOpen}\n${bodyHtml}\n</page>`;
   let truncated = false;
@@ -347,101 +361,157 @@ function isElementCandidate(element: Element): boolean {
   return true;
 }
 
-function collectKeptElements(interactiveElements: Element[]): Set<Element> {
-  const kept = new Set<Element>();
-
-  for (const element of interactiveElements) {
-    kept.add(element);
-
-    let current = element.parentElement;
-    while (current && current !== document.body && current !== document.documentElement) {
-      if (isMeaningfulAncestor(current)) {
-        kept.add(current);
-      }
-
-      current = current.parentElement;
-    }
-  }
-
-  return kept;
+function buildAgentChildren(parent: Element, interactiveElements: Set<Element>): AgentNode[] {
+  return Array.from(parent.children)
+    .flatMap((child) => buildAgentElement(child, interactiveElements));
 }
 
-function isMeaningfulAncestor(element: Element): boolean {
+function buildAgentElement(element: Element, interactiveElements: Set<Element>): AgentNode[] {
+  if (shouldDropElement(element)) {
+    return [];
+  }
+
   const tagName = element.tagName.toLowerCase();
-  return (
-    SEMANTIC_TAGS.has(tagName) ||
-    element.hasAttribute("role") ||
-    element.hasAttribute("aria-label") ||
-    element.hasAttribute("aria-labelledby") ||
-    element.hasAttribute("data-testid")
+  const children: AgentNode[] = [
+    ...collectDirectTextNodes(element),
+    ...buildAgentChildren(element, interactiveElements)
+  ];
+
+  return [{
+    kind: "element",
+    tagName,
+    attributes: collectAgentAttributes(element),
+    children,
+    interactive: interactiveElements.has(element),
+    sourceElement: element
+  }];
+}
+
+function simplifyAgentNodes(nodes: AgentNode[]): AgentNode[] {
+  return mergeAdjacentInlineTextNodes(
+    nodes.flatMap((node) => simplifyAgentNode(node))
   );
 }
 
-function serializeChildren(
-  parent: Element,
-  keptElements: Set<Element>,
-  interactiveElements: Set<Element>,
-  registry: RegistryState
-): string {
-  const parts: string[] = [];
-
-  for (const child of Array.from(parent.children)) {
-    const serialized = serializeElement(child, keptElements, interactiveElements, registry, 1);
-    if (serialized) {
-      parts.push(serialized);
-    }
+function simplifyAgentNode(node: AgentNode): AgentNode[] {
+  if (node.kind === "text") {
+    return [node];
   }
 
-  return parts.join("\n");
+  const simplifiedChildren = simplifyAgentNodes(node.children);
+  const simplifiedNode: AgentElementNode = {
+    ...node,
+    children: simplifiedChildren
+  };
+
+  if (!isTransparentWrapper(simplifiedNode)) {
+    return [simplifiedNode];
+  }
+
+  if (simplifiedChildren.length === 0) {
+    return [];
+  }
+
+  if (simplifiedChildren.every((child) => child.kind === "text")) {
+    return simplifiedChildren;
+  }
+
+  if (simplifiedChildren.length === 1) {
+    return simplifiedChildren;
+  }
+
+  return [simplifiedNode];
 }
 
-function serializeElement(
-  element: Element,
-  keptElements: Set<Element>,
-  interactiveElements: Set<Element>,
-  registry: RegistryState,
-  depth: number
-): string {
-  if (!isVisible(element) || shouldDropElement(element)) {
-    return "";
+function mergeAdjacentInlineTextNodes(nodes: AgentNode[]): AgentNode[] {
+  const merged: AgentNode[] = [];
+  let inlineTexts: string[] = [];
+
+  const flushInlineTexts = () => {
+    if (inlineTexts.length === 0) {
+      return;
+    }
+
+    merged.push({
+      kind: "text",
+      text: truncateText(normalizeText(inlineTexts.join(" "))),
+      flow: "inline"
+    });
+    inlineTexts = [];
+  };
+
+  for (const node of nodes) {
+    if (node.kind === "text" && node.flow === "inline") {
+      inlineTexts.push(node.text);
+      continue;
+    }
+
+    flushInlineTexts();
+    merged.push(node);
   }
 
-  if (!keptElements.has(element)) {
-    return Array.from(element.children)
-      .map((child) => serializeElement(child, keptElements, interactiveElements, registry, depth))
-      .filter(Boolean)
-      .join("\n");
+  flushInlineTexts();
+  return merged;
+}
+
+function isTransparentWrapper(node: AgentElementNode): boolean {
+  return (
+    (node.tagName === "div" || node.tagName === "span") &&
+    !node.interactive &&
+    node.attributes.length === 0
+  );
+}
+
+function assignElementIds(nodes: AgentNode[], registry: RegistryState): void {
+  for (const node of nodes) {
+    if (node.kind === "text") {
+      continue;
+    }
+
+    if (node.interactive) {
+      const elementId = `E${registry.elements.size + 1}`;
+      node.attributes = [
+        { name: "data-eid", value: elementId },
+        ...node.attributes
+      ];
+      registry.elements.set(elementId, node.sourceElement);
+    }
+
+    assignElementIds(node.children, registry);
+  }
+}
+
+function renderAgentNodes(nodes: AgentNode[], depth = 1): string {
+  return nodes
+    .map((node) => renderAgentNode(node, depth))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderAgentNode(node: AgentNode, depth: number): string {
+  const indent = observeIndent(depth);
+
+  if (node.kind === "text") {
+    return `${indent}${escapeText(node.text)}`;
   }
 
-  const tagName = element.tagName.toLowerCase();
-  const elementId = interactiveElements.has(element)
-    ? `E${registry.elements.size + 1}`
-    : "";
+  const attributes = renderAgentAttributes(node.attributes);
+  const open = attributes ? `<${node.tagName} ${attributes}>` : `<${node.tagName}>`;
 
-  if (elementId) {
-    registry.elements.set(elementId, element);
+  if (node.children.length === 0) {
+    return `${indent}${open}</${node.tagName}>`;
   }
 
-  const attributes = serializeAttributes(element, elementId);
-  const text = directText(element);
-  const childParts = Array.from(element.children)
-    .map((child) => serializeElement(child, keptElements, interactiveElements, registry, depth + 1))
-    .filter(Boolean);
-
-  if (!elementId && !text && childParts.length === 0) {
-    return "";
+  if (node.children.length === 1 && node.children[0].kind === "text") {
+    return `${indent}${open}${escapeText(node.children[0].text)}</${node.tagName}>`;
   }
 
-  const indent = "  ".repeat(depth);
-  const open = attributes ? `<${tagName} ${attributes}>` : `<${tagName}>`;
+  const body = renderAgentNodes(node.children, depth + 1);
+  return `${indent}${open}\n${body}\n${indent}</${node.tagName}>`;
+}
 
-  if (childParts.length === 0) {
-    return `${indent}${open}${escapeText(text)}</${tagName}>`;
-  }
-
-  const textLine = text ? `${indent}  ${escapeText(text)}` : "";
-  const body = [textLine, ...childParts].filter(Boolean).join("\n");
-  return `${indent}${open}\n${body}\n${indent}</${tagName}>`;
+function observeIndent(depth: number): string {
+  return INDENT_UNIT.repeat(depth % INDENT_RESET_DEPTH);
 }
 
 function shouldDropElement(element: Element): boolean {
@@ -450,13 +520,8 @@ function shouldDropElement(element: Element): boolean {
   );
 }
 
-function serializeAttributes(element: Element, elementId: string): string {
-  const attributes: string[] = [];
-
-  if (elementId) {
-    attributes.push(`data-eid="${escapeAttribute(elementId)}"`);
-  }
-
+function collectAgentAttributes(element: Element): AgentAttribute[] {
+  const attributes: AgentAttribute[] = [];
   for (const name of KEPT_ATTRIBUTES) {
     const value = element.getAttribute(name);
     if (value === null || value.length > 200) {
@@ -464,30 +529,46 @@ function serializeAttributes(element: Element, elementId: string): string {
     }
 
     if (name === "href") {
-      attributes.push(`${name}="${escapeAttribute(trimUrl(value))}"`);
+      attributes.push({ name, value: trimUrl(value) });
       continue;
     }
 
-    attributes.push(`${name}="${escapeAttribute(value)}"`);
+    attributes.push({ name, value });
   }
 
-  return attributes.join(" ");
+  return attributes;
 }
 
-function directText(element: Element): string {
-  const chunks: string[] = [];
-
-  for (const node of Array.from(element.childNodes)) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = normalizeText(node.textContent ?? "");
-      if (text) {
-        chunks.push(text);
-      }
-    }
-  }
-
-  return truncateText(chunks.join(" "));
+function renderAgentAttributes(attributes: AgentAttribute[]): string {
+  return attributes
+    .map((attribute) => `${attribute.name}="${escapeAttribute(attribute.value)}"`)
+    .join(" ");
 }
+
+function collectDirectTextNodes(element: Element): AgentTextNode[] {
+  return Array.from(element.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .flatMap((node) => {
+      const lines = normalizeObserveTextLines(node.textContent ?? "");
+      const flow = lines.length > 1 ? "line" : "inline";
+      return lines.map((text) => ({
+        kind: "text" as const,
+        text: truncateText(text),
+        flow
+      }));
+    });
+}
+
+function normalizeObserveTextLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// Controlled page actions
+// ---------------------------------------------------------------------------
 
 function actOnElement(input: BrowserActInput): BrowserActResult {
   const registry = state.registry;
@@ -618,6 +699,10 @@ function failure(error: string, message: string): BrowserActResult {
     shouldObserveAgain: true
   };
 }
+
+// ---------------------------------------------------------------------------
+// Shared DOM and text helpers
+// ---------------------------------------------------------------------------
 
 function isVisible(element: Element): boolean {
   if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {

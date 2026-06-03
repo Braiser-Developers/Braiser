@@ -13,7 +13,7 @@ Chrome 扩展 debug bridge
         -> Braised tab group 中的 agent focus 页面
 ```
 
-第一阶段目标：让本地 Agent 能通过 MCP 稳定观察和操作 Chrome 中受控的目标页面，并拿到清洗后的可读内容或压缩后的 agent-html。
+第一阶段目标：让本地 Agent 能通过 MCP 稳定观察和操作 Chrome 中受控的目标页面，并拿到清洗后的可读内容或带交互元素编号的 agent-html。
 
 ## 当前功能
 
@@ -23,8 +23,8 @@ Chrome 扩展 debug bridge
 - MCP server 与 daemon 通过 `ws://127.0.0.1:17833` 通信。
 - Chrome 扩展 debug bridge 与 daemon 通过 `ws://127.0.0.1:17832` 通信。
 - 读取和管理 `Braised` tab group 中的 agent focus 页面。
-- 抽取目标页面的可读文本。
-- 生成带 `data-eid` 的压缩 agent-html。
+- 抽取目标页面并以 Markdown 形式返回正文。
+- 生成带 `data-eid` 的 agent-html。
 - 对 agent-html 中登记过的元素执行点击、输入、选择、切换、聚焦和滚动。
 - 将页面保存为本地 Markdown。
 
@@ -64,6 +64,13 @@ To inspect the preprocessed HTML before Markdown conversion, run:
 
 ```powershell
 npm run download:preprocessed-html
+```
+
+Observe output and runtime DOM can also be downloaded with:
+
+```powershell
+npm run download:observe
+npm run download:dom
 ```
 
 The normalization and conversion contract is documented in
@@ -124,6 +131,13 @@ ws://127.0.0.1:17833  braiser-mcp -> braiser-daemon
 
 打开扩展 popup，点击“打开 Bridge”。Bridge 页面会连接 daemon，并在页面保持打开时维持 WebSocket 常驻。这样可以避免 MV3 background service worker 休眠导致连接断开。
 
+常用 CLI 辅助命令：
+
+```powershell
+npm run tabs
+npm run switch-tab -- <tabId>
+```
+
 ## MCP Tools
 
 当前暴露的工具：
@@ -136,11 +150,11 @@ ws://127.0.0.1:17833  braiser-mcp -> braiser-daemon
 - `browser.close_tab`：关闭指定 tab 或当前 agent focus tab，并重新选择焦点。
 - `browser.switch_tab`：把 agent focus 切换到 `Braised` tab group 中的指定 tab。
 - `browser.download`：通过 Chrome 原生下载管理器下载 URL 到默认下载目录；相对 URL 会基于当前 agent focus tab 解析，可选传入默认目录下的文件名。
-- `browser.observe`：把目标页面压缩成带 `data-eid` 的 agent-html；除 DOM/ARIA 规则外，也会纳入 CDP `isClickable` 发现的元素。CDP 节点通过 content script bridge 注册进 observe registry，不向真实 DOM 写临时属性。
+- `browser.observe`：把目标页面 DOM 转成带 `data-eid` 的 agent-html；除 DOM/ARIA 规则外，也会纳入 CDP `isClickable` 发现的元素。CDP 节点通过 content script bridge 注册进 observe registry，不向真实 DOM 写临时属性。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。
 - `debug.inject_js`：仅用于调试，向目标页面 MAIN world 注入 JavaScript，并返回 JSON 可序列化结果。
 - `debug.cdp_command`：仅用于调试，向目标 tab 发送 Chrome DevTools Protocol 命令，并返回 JSON 可序列化结果。
-- `page.extract_readable_text`：抽取目标页面的可读文本。
+- `page.extract_readable_text`：抽取目标页面运行时 DOM，并复用 Markdown pipeline，在返回对象的 `text` 字段中提供 Markdown。
 - `page.save_current_page`：抽取目标页面并保存为 Markdown。
 
 保存的页面写入：
