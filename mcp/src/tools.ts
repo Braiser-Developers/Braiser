@@ -7,6 +7,8 @@ import type {
   BrowserActResult,
   BrowserCloseTabInput,
   BrowserCreateTabInput,
+  BrowserDownloadInput,
+  BrowserDownloadResult,
   BrowserOpenTabInput,
   BrowserSwitchTabInput,
   BrowserTabInfo,
@@ -120,6 +122,34 @@ export const tools: Tool[] = [
         }
       },
       required: ["tabId"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "browser.download",
+    description: "Download a URL with Chrome's native download manager into the browser's default downloads directory. Relative URLs resolve against the current agent focus tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "URL to download. May be absolute or relative to the current agent focus tab."
+        },
+        filename: {
+          type: "string",
+          description: "Optional file name to use inside the default downloads directory. Path separators and parent directory segments are rejected."
+        },
+        conflictAction: {
+          type: "string",
+          enum: ["uniquify", "overwrite", "prompt"],
+          description: "How Chrome should handle an existing file name. Defaults to uniquify."
+        },
+        saveAs: {
+          type: "boolean",
+          description: "Whether to show Chrome's Save As dialog. Defaults to false."
+        }
+      },
+      required: ["url"],
       additionalProperties: false
     }
   },
@@ -263,6 +293,9 @@ export async function callTool(
     case "browser.switch_tab":
       return bridge.request<BrowserTabInfo>("browser.switch_tab", assertBrowserSwitchTabInput(args));
 
+    case "browser.download":
+      return bridge.request<BrowserDownloadResult>("browser.download", assertBrowserDownloadInput(args));
+
     case "browser.observe":
       return bridge.request<AgentHtmlSnapshot>("browser.observe");
 
@@ -343,6 +376,37 @@ function assertBrowserSwitchTabInput(args: Record<string, unknown>): BrowserSwit
   return {
     tabId: args.tabId as number,
     activate: assertOptionalBoolean(args.activate, "activate")
+  };
+}
+
+function assertBrowserDownloadInput(args: Record<string, unknown>): BrowserDownloadInput {
+  if (typeof args.url !== "string" || !args.url.trim()) {
+    throw new Error("browser.download requires a non-empty url string");
+  }
+
+  if (args.filename !== undefined) {
+    if (typeof args.filename !== "string" || !args.filename.trim()) {
+      throw new Error("browser.download filename must be a non-empty string when provided");
+    }
+    if (/[\\/]/.test(args.filename) || args.filename.includes("..")) {
+      throw new Error("browser.download filename must be a file name, not a path");
+    }
+  }
+
+  if (
+    args.conflictAction !== undefined &&
+    args.conflictAction !== "uniquify" &&
+    args.conflictAction !== "overwrite" &&
+    args.conflictAction !== "prompt"
+  ) {
+    throw new Error("browser.download conflictAction must be uniquify, overwrite, or prompt");
+  }
+
+  return {
+    url: args.url,
+    filename: args.filename as string | undefined,
+    conflictAction: args.conflictAction as BrowserDownloadInput["conflictAction"],
+    saveAs: assertOptionalBoolean(args.saveAs, "saveAs")
   };
 }
 

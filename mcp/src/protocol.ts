@@ -9,6 +9,7 @@ export type ExtensionRequestType =
   | "browser.open_tab"
   | "browser.close_tab"
   | "browser.switch_tab"
+  | "browser.download"
   | "page.extract_readable_text"
   | "browser.observe"
   | "browser.act"
@@ -95,6 +96,23 @@ export interface BrowserCloseTabInput {
 export interface BrowserSwitchTabInput {
   tabId: number;
   activate?: boolean;
+}
+
+export interface BrowserDownloadInput {
+  url: string;
+  filename?: string;
+  conflictAction?: "uniquify" | "overwrite" | "prompt";
+  saveAs?: boolean;
+}
+
+export interface BrowserDownloadResult {
+  downloadId: number;
+  url: string;
+  filename?: string;
+  state?: string;
+  danger?: string;
+  mime?: string;
+  totalBytes?: number;
 }
 
 export interface ReadablePage {

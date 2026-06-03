@@ -6,6 +6,8 @@ import {
   type BrowserActResult,
   type BrowserCloseTabInput,
   type BrowserCreateTabInput,
+  type BrowserDownloadInput,
+  type BrowserDownloadResult,
   type BrowserOpenTabInput,
   type BrowserSwitchTabInput,
   type BrowserTabInfo,
@@ -83,6 +85,8 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return closeTab(request.payload as BrowserCloseTabInput);
     case "browser.switch_tab":
       return switchTab(request.payload as BrowserSwitchTabInput);
+    case "browser.download":
+      return downloadUrl(request.payload as BrowserDownloadInput);
     case "page.extract_readable_text":
       return extractReadablePage();
     case "browser.observe":
@@ -241,6 +245,37 @@ async function switchTab(input: BrowserSwitchTabInput): Promise<BrowserTabInfo> 
   return tabToInfo(refreshed, true);
 }
 
+async function downloadUrl(input: BrowserDownloadInput): Promise<BrowserDownloadResult> {
+  if (!input || typeof input.url !== "string" || !input.url.trim()) {
+    throw new Error("browser.download requires a non-empty url string");
+  }
+
+  const tab = await getActiveTab();
+  const url = resolveDownloadUrl(input.url, tab.url);
+  const options: chrome.downloads.DownloadOptions = {
+    url,
+    conflictAction: input.conflictAction ?? "uniquify",
+    saveAs: input.saveAs ?? false
+  };
+
+  if (input.filename !== undefined) {
+    options.filename = normalizeDownloadFilename(input.filename);
+  }
+
+  const downloadId = await chrome.downloads.download(options);
+  const [item] = await chrome.downloads.search({ id: downloadId });
+
+  return {
+    downloadId,
+    url,
+    filename: item?.filename,
+    state: item?.state,
+    danger: item?.danger,
+    mime: item?.mime,
+    totalBytes: item?.totalBytes
+  };
+}
+
 function tabToInfo(tab: ActiveChromeTab, focused: boolean): BrowserTabInfo {
   return {
     tabId: tab.id,
@@ -344,6 +379,30 @@ function normalizeRequiredUrl(url: string): string {
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+
+function resolveDownloadUrl(url: string, baseUrl?: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    throw new Error("url must not be empty");
+  }
+
+  try {
+    return new URL(trimmed, baseUrl || undefined).toString();
+  } catch {
+    throw new Error("browser.download url must be absolute or relative to the current page");
+  }
+}
+
+function normalizeDownloadFilename(filename: string): string {
+  const trimmed = filename.trim();
+  if (!trimmed) {
+    throw new Error("browser.download filename must not be empty");
+  }
+  if (/[\\/]/.test(trimmed) || trimmed.includes("..")) {
+    throw new Error("browser.download filename must be a file name, not a path");
+  }
+  return trimmed;
 }
 
 async function extractReadablePage(): Promise<ReadablePage> {
