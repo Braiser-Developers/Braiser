@@ -208,7 +208,7 @@ page.save_current_page
 
 agent-html 会遍历 `document.body` 中未丢弃的 DOM 节点，并为可操作元素分配 `data-eid`。
 可交互元素来源包括标准表单/链接/按钮/ARIA 规则，以及 CDP `isClickable` 桥接注册的元素。
-observe 先把 DOM 转成内部 AgentNode 树，只保留少量面向 Agent 有用的属性，并丢弃 `script`、`style`、`link`、`meta`、`svg` 和 `path`。
+observe 先把 DOM 转成内部 AgentNode 树，只保留少量面向 Agent 有用的属性，并丢弃 `script`、`style`、`link`、`meta`、`svg`、`path`，以及 `hidden`、`display:none`、`visibility:hidden`、`opacity:0` 这类明确不可见的整棵子树。
 随后在树结构上做简化：无属性、非交互的 `div` 和 `span` 会作为透明 wrapper，无内容则删除，只有纯文本则输出文本，只有一个有效子节点则折叠为子节点，多行纯文本保留为多行文本；连续的单行纯文本会合并为空格分隔的一行。
 `data-eid` 在树简化后分配，因此 registry 只记录最终输出中真实存在的可交互元素。
 最后统一渲染 agent-html；缩进只在渲染阶段生成，每层两个空格，并按 12 个空格取模循环，以减少深层 DOM 的空白开销。

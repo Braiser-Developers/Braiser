@@ -362,20 +362,29 @@ function isElementCandidate(element: Element): boolean {
 }
 
 function buildAgentChildren(parent: Element, interactiveElements: Set<Element>): AgentNode[] {
-  return Array.from(parent.children)
-    .flatMap((child) => buildAgentElement(child, interactiveElements));
+  return Array.from(parent.childNodes)
+    .flatMap((child) => buildAgentChild(child, interactiveElements));
+}
+
+function buildAgentChild(node: ChildNode, interactiveElements: Set<Element>): AgentNode[] {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return buildAgentTextNodes(node.textContent ?? "");
+  }
+
+  if (node instanceof Element) {
+    return buildAgentElement(node, interactiveElements);
+  }
+
+  return [];
 }
 
 function buildAgentElement(element: Element, interactiveElements: Set<Element>): AgentNode[] {
-  if (shouldDropElement(element)) {
+  if (shouldDropElement(element) || shouldDropInvisibleSubtree(element)) {
     return [];
   }
 
   const tagName = element.tagName.toLowerCase();
-  const children: AgentNode[] = [
-    ...collectDirectTextNodes(element),
-    ...buildAgentChildren(element, interactiveElements)
-  ];
+  const children = buildAgentChildren(element, interactiveElements);
 
   return [{
     kind: "element",
@@ -520,6 +529,10 @@ function shouldDropElement(element: Element): boolean {
   );
 }
 
+function shouldDropInvisibleSubtree(element: Element): boolean {
+  return isVisibilitySuppressed(element);
+}
+
 function collectAgentAttributes(element: Element): AgentAttribute[] {
   const attributes: AgentAttribute[] = [];
   for (const name of KEPT_ATTRIBUTES) {
@@ -545,18 +558,14 @@ function renderAgentAttributes(attributes: AgentAttribute[]): string {
     .join(" ");
 }
 
-function collectDirectTextNodes(element: Element): AgentTextNode[] {
-  return Array.from(element.childNodes)
-    .filter((node) => node.nodeType === Node.TEXT_NODE)
-    .flatMap((node) => {
-      const lines = normalizeObserveTextLines(node.textContent ?? "");
-      const flow = lines.length > 1 ? "line" : "inline";
-      return lines.map((text) => ({
-        kind: "text" as const,
-        text: truncateText(text),
-        flow
-      }));
-    });
+function buildAgentTextNodes(textContent: string): AgentTextNode[] {
+  const lines = normalizeObserveTextLines(textContent);
+  const flow = lines.length > 1 ? "line" : "inline";
+  return lines.map((text) => ({
+    kind: "text",
+    text: truncateText(text),
+    flow
+  }));
 }
 
 function normalizeObserveTextLines(text: string): string[] {
@@ -705,19 +714,32 @@ function failure(error: string, message: string): BrowserActResult {
 // ---------------------------------------------------------------------------
 
 function isVisible(element: Element): boolean {
-  if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+  if (isVisibilitySuppressed(element)) {
     return false;
   }
 
   const rect = element.getBoundingClientRect();
-  const style = window.getComputedStyle(element);
 
   return (
-    style.display !== "none" &&
-    style.visibility !== "hidden" &&
-    style.opacity !== "0" &&
     rect.width > 0 &&
     rect.height > 0
+  );
+}
+
+function isVisibilitySuppressed(element: Element): boolean {
+  if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
+    return true;
+  }
+
+  if (element.hasAttribute("hidden")) {
+    return true;
+  }
+
+  const style = window.getComputedStyle(element);
+  return (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    style.opacity === "0"
   );
 }
 
