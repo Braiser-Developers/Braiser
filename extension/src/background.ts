@@ -12,6 +12,8 @@ import {
   type BrowserSwitchTabInput,
   type BrowserTabInfo,
   type BrowserTabList,
+  type BrowserUploadInput,
+  type BrowserUploadResult,
   type BridgeRuntimeRequest,
   type DebugCdpCommandInput,
   type DebugCdpCommandResult,
@@ -87,6 +89,8 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return switchTab(request.payload as BrowserSwitchTabInput);
     case "browser.download":
       return downloadUrl(request.payload as BrowserDownloadInput);
+    case "browser.upload":
+      return uploadFiles(request.payload as BrowserUploadInput);
     case "page.extract_readable_text":
       return extractReadablePage();
     case "browser.observe":
@@ -423,6 +427,110 @@ async function observePage(): Promise<AgentHtmlSnapshot> {
 
 async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
   return sendContentRequest<BrowserActResult>("browser.act", input);
+}
+
+async function uploadFiles(input: BrowserUploadInput): Promise<BrowserUploadResult> {
+  if (
+    !input ||
+    typeof input.snapshotId !== "string" ||
+    typeof input.elementId !== "string" ||
+    !Array.isArray(input.files) ||
+    input.files.length === 0 ||
+    input.files.some((file) => typeof file !== "string" || !file)
+  ) {
+    return uploadFailure("invalid_input", "browser.upload requires snapshotId, elementId, and one or more file paths.");
+  }
+
+  const tab = await getActiveTab();
+  await ensureContentScript(tab.id);
+
+  try {
+    return await withDebuggerSession(tab.id, async (target) => {
+      const contextId = await findCdpBridgeContextId(target);
+      if (!contextId) {
+        return uploadFailure("upload_target_unavailable", "Could not access the active observe snapshot.");
+      }
+
+      const resolved = await chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+        expression: `globalThis.${CDP_BRIDGE_GLOBAL}?.getSnapshotElement(${JSON.stringify(input.snapshotId)}, ${JSON.stringify(input.elementId)}) ?? null`,
+        contextId,
+        returnByValue: false,
+        silent: true
+      }) as CdpEvaluateResult;
+      const objectId = resolved.result?.objectId;
+      if (!objectId) {
+        return uploadFailure(
+          "stale_element",
+          `Element ${input.elementId} is not available in snapshot ${input.snapshotId}. Please call browser.observe again.`
+        );
+      }
+
+      try {
+        const validation = await chrome.debugger.sendCommand(target, "Runtime.callFunctionOn", {
+          objectId,
+          functionDeclaration: `function(fileCount) {
+            if (!(this instanceof HTMLInputElement) || this.type !== "file") {
+              return { ok: false, error: "element_not_file_input", message: "Target element is not an input[type=file]." };
+            }
+            if (!this.isConnected) {
+              return { ok: false, error: "stale_element", message: "Target file input is no longer connected." };
+            }
+            if (this.matches(":disabled") || this.getAttribute("aria-disabled") === "true") {
+              return { ok: false, error: "element_disabled", message: "Target file input is disabled." };
+            }
+            if (fileCount > 1 && !this.multiple) {
+              return { ok: false, error: "multiple_files_not_allowed", message: "Target file input does not allow multiple files." };
+            }
+            return { ok: true };
+          }`,
+          arguments: [{ value: input.files.length }],
+          returnByValue: true,
+          silent: true
+        }) as CdpCallFunctionResult;
+        const result = validation.result?.value as {
+          ok?: boolean;
+          error?: string;
+          message?: string;
+        } | undefined;
+        if (!result?.ok) {
+          return uploadFailure(
+            result?.error ?? "invalid_upload_target",
+            result?.message ?? "Target element cannot accept these files."
+          );
+        }
+
+        await chrome.debugger.sendCommand(target, "DOM.setFileInputFiles", {
+          objectId,
+          files: input.files
+        });
+
+        return {
+          ok: true,
+          status: "files_selected",
+          fileCount: input.files.length,
+          targetUrl: tab.url ?? "",
+          shouldObserveAgain: true
+        };
+      } finally {
+        await chrome.debugger.sendCommand(target, "Runtime.releaseObject", { objectId })
+          .catch(() => undefined);
+      }
+    });
+  } catch (error) {
+    return uploadFailure(
+      "execution_failed",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+
+function uploadFailure(error: string, message: string): BrowserUploadResult {
+  return {
+    ok: false,
+    error,
+    message,
+    shouldObserveAgain: true
+  };
 }
 
 async function injectDebugJs(input: DebugInjectJsInput): Promise<DebugInjectJsResult> {

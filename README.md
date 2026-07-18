@@ -152,6 +152,7 @@ npm run switch-tab -- <tabId>
 - `browser.download`：通过 Chrome 原生下载管理器下载 URL 到默认下载目录；相对 URL 会基于当前 agent focus tab 解析，可选传入默认目录下的文件名。
 - `browser.observe`：把目标页面 DOM 转成带 `data-eid` 的 agent-html；除 DOM/ARIA 规则外，也会纳入 CDP `isClickable` 发现的元素。CDP 节点通过 content script bridge 注册进 observe registry，不向真实 DOM 写临时属性。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。
+- `browser.upload`：把本地绝对路径指向的普通文件设置到 observe 快照中的 `<input type="file">`；文件选入后立即返回，不等待网页完成上传或处理。
 - `debug.inject_js`：仅用于调试，向目标页面 MAIN world 注入 JavaScript，并返回 JSON 可序列化结果。
 - `debug.cdp_command`：仅用于调试，向目标 tab 发送 Chrome DevTools Protocol 命令，并返回 JSON 可序列化结果。
 - `page.extract_readable_text`：抽取目标页面运行时 DOM，并复用 Markdown pipeline，在返回对象的 `text` 字段中提供 Markdown。

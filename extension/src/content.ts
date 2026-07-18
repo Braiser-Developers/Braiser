@@ -64,6 +64,7 @@ interface CdpBridgeRun {
 interface CdpBridge {
   version: 1;
   registerElement: (runId: string, element: unknown) => boolean;
+  getSnapshotElement: (snapshotId: string, elementId: string) => Element | null;
 }
 
 interface AgentAttribute {
@@ -132,6 +133,11 @@ const KEPT_ATTRIBUTES = [
   "alt",
   "value",
   "disabled",
+  "accept",
+  "multiple",
+  "capture",
+  "webkitdirectory",
+  "aria-hidden",
   "contenteditable",
   "data-testid"
 ];
@@ -178,6 +184,15 @@ globalState[CDP_BRIDGE_KEY] = {
     run.elements.push(element);
     state.cdpBridgeRuns.set(runId, run);
     return true;
+  },
+  getSnapshotElement(snapshotId: string, elementId: string): Element | null {
+    const registry = state.registry;
+    if (!registry || registry.snapshotId !== snapshotId) {
+      return null;
+    }
+
+    const element = registry.elements.get(elementId);
+    return element && document.contains(element) ? element : null;
   }
 };
 
@@ -270,7 +285,7 @@ function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
   const interactiveElements = dedupeElements([
     ...localInteractiveElements,
     ...cdpInteractiveElements
-  ]).filter((element) => isElementCandidate(element) && isVisible(element));
+  ]).filter((element) => isElementCandidate(element) && (isFileInput(element) || isVisible(element)));
   const interactiveElementSet = new Set(interactiveElements);
   const bodyNodes = buildAgentChildren(document.body, interactiveElementSet);
   const simplifiedNodes = simplifyAgentNodes(bodyNodes);
@@ -323,7 +338,7 @@ function assertObserveInput(payload: unknown): ObserveInput {
 
 function collectInteractiveElements(): Element[] {
   return Array.from(document.querySelectorAll(INTERACTIVE_SELECTOR))
-    .filter((element) => isElementCandidate(element) && isVisible(element));
+    .filter((element) => isElementCandidate(element) && (isFileInput(element) || isVisible(element)));
 }
 
 function consumeCdpBridgeElements(runId: string | undefined): Element[] {
@@ -361,6 +376,10 @@ function isElementCandidate(element: Element): boolean {
   return true;
 }
 
+function isFileInput(element: Element): element is HTMLInputElement {
+  return element instanceof HTMLInputElement && element.type === "file";
+}
+
 function buildAgentChildren(parent: Element, interactiveElements: Set<Element>): AgentNode[] {
   return Array.from(parent.childNodes)
     .flatMap((child) => buildAgentChild(child, interactiveElements));
@@ -379,8 +398,13 @@ function buildAgentChild(node: ChildNode, interactiveElements: Set<Element>): Ag
 }
 
 function buildAgentElement(element: Element, interactiveElements: Set<Element>): AgentNode[] {
-  if (shouldDropElement(element) || shouldDropInvisibleSubtree(element)) {
+  if (shouldDropElement(element)) {
     return [];
+  }
+  if (!isFileInput(element) && shouldDropInvisibleSubtree(element)) {
+    return Array.from(element.querySelectorAll("input[type='file']"))
+      .filter((fileInput) => interactiveElements.has(fileInput))
+      .flatMap((fileInput) => buildAgentElement(fileInput, interactiveElements));
   }
 
   const tagName = element.tagName.toLowerCase();
@@ -535,7 +559,10 @@ function shouldDropInvisibleSubtree(element: Element): boolean {
 
 function collectAgentAttributes(element: Element): AgentAttribute[] {
   const attributes: AgentAttribute[] = [];
-  for (const name of KEPT_ATTRIBUTES) {
+  const keptAttributes = isFileInput(element)
+    ? ["id", "name", ...KEPT_ATTRIBUTES]
+    : KEPT_ATTRIBUTES;
+  for (const name of keptAttributes) {
     const value = element.getAttribute(name);
     if (value === null || value.length > 200) {
       continue;

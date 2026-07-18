@@ -1,4 +1,6 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { stat } from "node:fs/promises";
+import { basename, isAbsolute } from "node:path";
 import type { ExtensionBridge } from "./websocket.js";
 import type {
   ActiveTabInfo,
@@ -13,6 +15,9 @@ import type {
   BrowserSwitchTabInput,
   BrowserTabInfo,
   BrowserTabList,
+  BrowserUploadFile,
+  BrowserUploadInput,
+  BrowserUploadResult,
   CleanPage,
   DebugCdpCommandInput,
   DebugCdpCommandResult,
@@ -209,6 +214,33 @@ export const tools: Tool[] = [
     }
   },
   {
+    name: "browser.upload",
+    description: "Set one or more local files on an input[type=file] from the latest browser.observe snapshot. Returns as soon as the files are selected; it does not wait for the website to finish uploading or processing them. Call browser.observe again to determine progress or completion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        snapshotId: {
+          type: "string",
+          description: "Snapshot id returned by browser.observe, such as S1."
+        },
+        elementId: {
+          type: "string",
+          description: "Element id for an input[type=file] in agent-html, such as E7."
+        },
+        files: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "string"
+          },
+          description: "Absolute paths of existing local files. Directories and glob patterns are not supported."
+        }
+      },
+      required: ["snapshotId", "elementId", "files"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "debug.inject_js",
     description: "For debug purpose only: directly inject JavaScript into the current agent focus Braised page and return a JSON-serializable result.",
     inputSchema: {
@@ -301,6 +333,13 @@ export async function callTool(
 
     case "browser.act":
       return bridge.request<BrowserActResult>("browser.act", assertBrowserActInput(args));
+
+    case "browser.upload": {
+      const input = assertBrowserUploadInput(args);
+      const files = await validateUploadFiles(input.files);
+      const result = await bridge.request<BrowserUploadResult>("browser.upload", input);
+      return result.ok ? { ...result, files } : result;
+    }
 
     case "debug.inject_js":
       return bridge.request<DebugInjectJsResult>("debug.inject_js", assertDebugInjectJsInput(args));
@@ -418,6 +457,51 @@ function assertBrowserActInput(args: Record<string, unknown>): BrowserActInput {
   }
 
   return args as unknown as BrowserActInput;
+}
+
+function assertBrowserUploadInput(args: Record<string, unknown>): BrowserUploadInput {
+  const { snapshotId, elementId, files } = args;
+  if (typeof snapshotId !== "string" || !snapshotId.trim()) {
+    throw new Error("browser.upload requires a non-empty snapshotId string");
+  }
+  if (typeof elementId !== "string" || !elementId.trim()) {
+    throw new Error("browser.upload requires a non-empty elementId string");
+  }
+  if (!Array.isArray(files) || files.length === 0 || files.some((file) => typeof file !== "string" || !file.trim())) {
+    throw new Error("browser.upload requires a non-empty array of file path strings");
+  }
+
+  return {
+    snapshotId,
+    elementId,
+    files: files as string[]
+  };
+}
+
+async function validateUploadFiles(paths: string[]): Promise<BrowserUploadFile[]> {
+  return Promise.all(paths.map(async (filePath) => {
+    if (!isAbsolute(filePath)) {
+      throw new Error(`browser.upload file path must be absolute: ${filePath}`);
+    }
+    if (/[*?[\]{}]/.test(filePath)) {
+      throw new Error(`browser.upload does not accept glob patterns: ${filePath}`);
+    }
+
+    let fileStat;
+    try {
+      fileStat = await stat(filePath);
+    } catch {
+      throw new Error(`browser.upload file does not exist or cannot be accessed: ${filePath}`);
+    }
+    if (!fileStat.isFile()) {
+      throw new Error(`browser.upload path must refer to a regular file: ${filePath}`);
+    }
+
+    return {
+      name: basename(filePath),
+      size: fileStat.size
+    };
+  }));
 }
 
 function assertDebugCdpCommandInput(args: Record<string, unknown>): DebugCdpCommandInput {

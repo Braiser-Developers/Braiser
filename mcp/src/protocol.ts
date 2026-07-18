@@ -10,6 +10,7 @@ export type ExtensionRequestType =
   | "browser.close_tab"
   | "browser.switch_tab"
   | "browser.download"
+  | "browser.upload"
   | "page.extract_readable_text"
   | "browser.observe"
   | "browser.act"
@@ -113,6 +114,28 @@ export interface BrowserDownloadResult {
   danger?: string;
   mime?: string;
   totalBytes?: number;
+}
+
+export interface BrowserUploadInput {
+  snapshotId: string;
+  elementId: string;
+  files: string[];
+}
+
+export interface BrowserUploadFile {
+  name: string;
+  size: number;
+}
+
+export interface BrowserUploadResult {
+  ok: boolean;
+  status?: "files_selected";
+  fileCount?: number;
+  targetUrl?: string;
+  files?: BrowserUploadFile[];
+  error?: string;
+  message?: string;
+  shouldObserveAgain: boolean;
 }
 
 export interface ReadablePage {

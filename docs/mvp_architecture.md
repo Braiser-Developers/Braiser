@@ -114,6 +114,7 @@ browser.switch_tab
 browser.download
 browser.observe
 browser.act
+browser.upload
 debug.inject_js
 debug.cdp_command
 page.extract_readable_text
@@ -207,8 +208,8 @@ page.save_current_page
 观察目标页面，返回包含页面 DOM 结构的 agent-html。
 
 agent-html 会遍历 `document.body` 中未丢弃的 DOM 节点，并为可操作元素分配 `data-eid`。
-可交互元素来源包括标准表单/链接/按钮/ARIA 规则，以及 CDP `isClickable` 桥接注册的元素。
-observe 先把 DOM 转成内部 AgentNode 树，只保留少量面向 Agent 有用的属性，并丢弃 `script`、`style`、`link`、`meta`、`svg`、`path`，以及 `hidden`、`display:none`、`visibility:hidden`、`opacity:0` 这类明确不可见的整棵子树。
+可交互元素来源包括标准表单/链接/按钮/ARIA 规则，以及 CDP `isClickable` 桥接注册的元素。`input[type=file]` 是上传目标，即使自身明确不可见也会保留并进入 registry。
+observe 先把 DOM 转成内部 AgentNode 树，只保留少量面向 Agent 有用的属性，并丢弃 `script`、`style`、`link`、`meta`、`svg`、`path`，以及 `hidden`、`display:none`、`visibility:hidden`、`opacity:0` 这类明确不可见的整棵子树；file input 自身不受不可见过滤影响。
 随后在树结构上做简化：无属性、非交互的 `div` 和 `span` 会作为透明 wrapper，无内容则删除，只有纯文本则输出文本，只有一个有效子节点则折叠为子节点，多行纯文本保留为多行文本；连续的单行纯文本会合并为空格分隔的一行。
 `data-eid` 在树简化后分配，因此 registry 只记录最终输出中真实存在的可交互元素。
 最后统一渲染 agent-html；缩进只在渲染阶段生成，每层两个空格，并按 12 个空格取模循环，以减少深层 DOM 的空白开销。
@@ -253,6 +254,22 @@ toggle
 focus
 scroll-into-view
 ```
+
+### `browser.upload`
+
+基于最近一次 `browser.observe` 快照，把一个或多个本地文件设置到指定的 `<input type="file">`。文件路径必须是已存在普通文件的绝对路径；不接受目录、glob 或相对路径。隐藏的 file input 也会保留在 observe registry 中，并在 agent-html 中携带 `accept`、`multiple`、`capture` 和 `webkitdirectory` 等上传相关属性。
+
+输入示例：
+
+```json
+{
+  "snapshotId": "S1",
+  "elementId": "E7",
+  "files": ["D:\\build\\braiser.zip"]
+}
+```
+
+工具通过 CDP `DOM.setFileInputFiles` 设置文件，并在文件已选入 input 后立即返回；它不等待网页完成网络上传、转码或其他处理。调用方应重新执行 `browser.observe` 判断进度、成功或失败。Braiser 不根据 input 的 `accept` 属性提前拒绝文件，最终类型和大小约束由网页处理。
 
 ### `debug.inject_js`
 
@@ -305,7 +322,7 @@ scroll-into-view
 
 ```text
 activeTab: 保留给扩展交互场景
-debugger: 仅用于 debug.cdp_command 临时发送 CDP 命令
+debugger: 用于 browser.observe 的 clickability 补充、browser.upload 设置文件，以及 debug.cdp_command 临时发送 CDP 命令
 scripting: 注入 content script
 storage: 保存扩展侧连接状态
 tabGroups: 查找 Braised 标签组
