@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "npm run setup:markdown",
     "build": "npm run build:extension && npm run build:mcp",
     "build:extension": "tsc -p extension/tsconfig.json",
     "build:mcp": "tsc -p mcp/tsconfig.json",

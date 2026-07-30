@@ -168,19 +168,15 @@ function markdownPythonAttempts(args: string[]): Array<{ command: string; args: 
   const pythonPath = process.platform === "win32"
     ? path.join(MARKDOWN_VENV_DIR, "Scripts", "python.exe")
     : path.join(MARKDOWN_VENV_DIR, "bin", "python");
-  const attempts: Array<{ command: string; args: string[] }> = [];
 
-  if (existsSync(pythonPath)) {
-    attempts.push({ command: pythonPath, args });
+  if (!existsSync(pythonPath)) {
+    throw new Error(
+      `Project Markdown environment is unavailable at ${pythonPath}. ` +
+      "Run npm install (or npm run setup:markdown) and try again."
+    );
   }
 
-  attempts.push(
-    { command: "py", args: ["-3", ...args] },
-    { command: "python", args },
-    { command: "python3", args }
-  );
-
-  return attempts;
+  return [{ command: pythonPath, args }];
 }
 
 function runProcess(command: string, args: string[]): Promise<ProcessResult> {

@@ -10,27 +10,28 @@ const requirementsPath = path.join(rootDir, "requirements-markdown.txt");
 
 const python = await findPython();
 if (!python) {
-  console.error("Python was not found. Install Python 3 and rerun npm run setup:markdown.");
+  console.error("Python 3.10 or newer was not found. Install it and rerun npm install.");
   process.exit(1);
 }
 
-if (!existsSync(venvPythonPath())) {
+const projectPython = venvPythonPath();
+
+if (!existsSync(projectPython)) {
   await run(python.command, [...python.args, "-m", "venv", venvDir]);
 }
 
-await run(venvPythonPath(), [
+await run(projectPython, [
   "-m",
   "pip",
   "install",
-  "--upgrade",
-  "pip"
-]);
-await run(venvPythonPath(), [
-  "-m",
-  "pip",
-  "install",
+  "--disable-pip-version-check",
   "-r",
   requirementsPath
+]);
+
+await run(projectPython, [
+  "-c",
+  "import bs4, markitdown"
 ]);
 
 console.log(`Markdown venv ready: ${venvDir}`);
@@ -38,13 +39,21 @@ console.log(`Markdown venv ready: ${venvDir}`);
 async function findPython() {
   const candidates = [
     { command: process.env.PYTHON, args: [] },
+    { command: "python3.13", args: [] },
+    { command: "python3.12", args: [] },
+    { command: "python3.11", args: [] },
+    { command: "python3.10", args: [] },
     { command: "python", args: [] },
     { command: "py", args: ["-3"] },
     { command: "python3", args: [] }
   ].filter((candidate) => candidate.command);
 
   for (const candidate of candidates) {
-    const result = await run(candidate.command, [...candidate.args, "--version"], {
+    const result = await run(candidate.command, [
+      ...candidate.args,
+      "-c",
+      "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+    ], {
       allowFailure: true
     });
     if (result === 0) {

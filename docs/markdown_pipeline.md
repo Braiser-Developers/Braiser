@@ -5,7 +5,9 @@
 
 ## 依赖协议
 
-Markdown conversion 使用项目本地 Python 虚拟环境 `.venv-markdown/`。安装命令：
+Markdown conversion 使用项目本地 Python 虚拟环境 `.venv-markdown/`。根目录的
+`npm install` 会自动创建该环境并安装依赖；如果 Python 3.10 或更高版本不可用，安装会直接失败，
+避免留下只能运行部分功能的项目。手动修复或重建环境时可运行：
 
 ```powershell
 npm run setup:markdown

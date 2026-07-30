@@ -31,6 +31,7 @@ Chrome 扩展 debug bridge
 ## 环境要求
 
 - Node.js
+- Python 3.10 或更高版本（Markdown conversion 的必需依赖）
 - npm
 - Google Chrome，或支持 Manifest V3 的 Chromium 浏览器
 
@@ -43,13 +44,15 @@ npm install
 ### Markdown conversion setup
 
 Markdown export uses Microsoft MarkItDown from a project-local Python virtual environment.
-Run this once after `npm install`:
+`npm install` creates `.venv-markdown/` and installs the packages from
+`requirements-markdown.txt` automatically. Python 3.10 or newer must be available on the machine;
+otherwise `npm install` fails rather than leaving Markdown export partially configured.
+
+To repair or recreate this environment manually, run:
 
 ```powershell
 npm run setup:markdown
 ```
-
-This creates `.venv-markdown/` and installs packages from `requirements-markdown.txt`.
 Braiser preprocesses KaTeX annotations into marked math nodes before handing the HTML to a
 project-local MarkItDown wrapper, so math text is preserved instead of being escaped as
 ordinary Markdown text.
