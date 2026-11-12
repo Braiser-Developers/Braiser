@@ -17,3 +17,4 @@
 | [旧定位与展望](project_positioning.md) | 历史材料，本次不作为当前作者预期 |
 | [原始备注](todo/realskc_remarks.md) | 原文保留的笔记 |
 | [Observe/Act 草稿](todo/browser-agent-dom-mvp-agent-html.md) | 原文保留的历史设计草稿 |
+| [远程部署实测](../references/deployment-2026-11-12.md) | 当前远程联调状态和验证边界 |
