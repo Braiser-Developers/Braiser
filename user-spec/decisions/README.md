@@ -75,5 +75,6 @@
 | [D-0005](0005-extension-replacement.md) | 修复旧扩展连接取消新连接请求的问题 | 有效 |
 | [D-0006](0006-malformed-bridge-messages.md) | 修复桥接消息解析异常导致进程退出的问题 | 有效 |
 | [D-0007](0007-timeouts-and-reconnection.md) | 统一桥接超时并明确动作结果未知 | 有效 |
-| [D-0008](0008-user-spec-migration.md) | 建立 user spec 并保留旧材料的来源边界 | 有效 |
+| [D-0008](0008-user-spec-migration.md) | 建立 user spec 并保留旧材料的来源边界 | 部分被取代（→ [D-0010](0010-user-spec-recording-standard.md)） |
 | [D-0009](0009-existing-markdown-pipeline.md) | 保留既有 Markdown 转换依赖与执行位置 | 有效 |
+| [D-0010](0010-user-spec-recording-standard.md) | 同步新版记录规则并按主题整理需求总览 | 有效 |
