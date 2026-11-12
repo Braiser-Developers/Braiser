@@ -1,3 +1,5 @@
+import type { Mode } from "./config.js";
+import { toolAllowed } from "./policy.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
@@ -294,18 +296,27 @@ export const tools: Tool[] = [
   }
 ];
 
+export function toolsForMode(mode: Mode): Tool[] {
+  return tools.filter(tool => toolAllowed(tool.name, mode));
+}
+
 export async function callTool(
   name: string,
   bridge: ExtensionBridge,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  mode: Mode = "local"
 ): Promise<unknown> {
+  if (!toolAllowed(name, mode)) throw new Error(`Tool unavailable in remote mode: ${name}`);
   switch (name) {
-    case "braiser.status":
-      return {
-        mcp: "ok",
-        daemonConnected: await bridge.isDaemonConnected(),
-        extensionConnected: await bridge.isExtensionConnected()
-      };
+    case "braiser.status": {
+      try {
+        const status = await bridge.status();
+        return { mcp: "ok", mode, endpoint: bridge.url, daemonConnected: true, ...status };
+      } catch (error) {
+        return { mcp: "ok", mode, endpoint: bridge.url, daemonConnected: false, extensionConnected: false,
+          error: error instanceof Error ? error.message : String(error) };
+      }
+    }
 
     case "browser.get_active_tab":
       return bridge.request<ActiveTabInfo>("browser.get_active_tab");

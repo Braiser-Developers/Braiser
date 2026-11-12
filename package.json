@@ -21,7 +21,9 @@
     "tabs": "node mcp/dist/cli.js tabs",
     "switch-tab": "node mcp/dist/cli.js switch-tab",
     "mcp": "node mcp/dist/server.js",
-    "daemon": "node mcp/dist/daemon.js"
+    "daemon": "node mcp/dist/daemon.js",
+    "remote": "node mcp/dist/remote.js remote",
+    "test": "npm run build && node --test mcp/test/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

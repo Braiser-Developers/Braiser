@@ -39,6 +39,7 @@ export type DaemonRequest =
       id: string;
       type: "extension.request";
       request: Omit<ExtensionRequest, "id">;
+      timeoutMs?: number;
     };
 
 export type DaemonRequestInput =
@@ -48,6 +49,7 @@ export type DaemonRequestInput =
   | {
       type: "extension.request";
       request: Omit<ExtensionRequest, "id">;
+      timeoutMs?: number;
     };
 
 export interface DaemonResponse<T = unknown> {
@@ -59,6 +61,8 @@ export interface DaemonResponse<T = unknown> {
 
 export interface DaemonStatus {
   daemon: "ok";
+  protocolVersion: 2;
+  clientMode: "local" | "remote";
   extensionConnected: boolean;
 }
 

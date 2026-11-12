@@ -1,160 +1,129 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import {
-  BRAISER_DAEMON_WS_PORT,
-  type DaemonRequest,
-  type DaemonRequestInput,
-  type DaemonResponse,
-  type DaemonStatus,
-  type ExtensionRequestType
-} from "./protocol.js";
+import type { DaemonRequestInput, DaemonResponse, DaemonStatus, ExtensionRequestType } from "./protocol.js";
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
-  reject: (reason?: unknown) => void;
+  reject: (reason: Error) => void;
   timer: NodeJS.Timeout;
+}
+
+export class BridgeError extends Error {
+  constructor(public readonly kind: "unavailable" | "unauthorized" | "protocol" | "unknown_outcome", message: string) {
+    super(message);
+  }
 }
 
 export class ExtensionBridge {
   private socket: WebSocket | null = null;
   private connecting: Promise<WebSocket> | null = null;
   private readonly pending = new Map<string, PendingRequest>();
+  private closed = false;
 
   constructor(
-    private readonly port = BRAISER_DAEMON_WS_PORT,
-    private readonly host = "127.0.0.1"
+    public readonly url: string,
+    private readonly token: string,
+    private readonly timeoutMs = 30000,
+    private readonly connectTimeoutMs = 3000
   ) {}
 
-  async isDaemonConnected(): Promise<boolean> {
-    try {
-      await this.ensureSocket();
-      return true;
-    } catch {
-      return false;
+  async status(): Promise<DaemonStatus> {
+    const status = await this.daemonRequest<DaemonStatus>({ type: "daemon.status" }, 3000);
+    if (status?.daemon !== "ok" || status.protocolVersion !== 2 ||
+        !["local", "remote"].includes(status.clientMode) || typeof status.extensionConnected !== "boolean") {
+      throw new BridgeError("protocol", "Incompatible Braiser daemon; rebuild and restart it before enabling remote access");
     }
+    return status;
+  }
+
+  async isDaemonConnected(): Promise<boolean> {
+    try { await this.status(); return true; } catch { return false; }
   }
 
   async isExtensionConnected(): Promise<boolean> {
-    try {
-      const status = await this.daemonRequest<DaemonStatus>({ type: "daemon.status" });
-      return status.extensionConnected;
-    } catch {
-      return false;
-    }
+    try { return (await this.status()).extensionConnected; } catch { return false; }
   }
 
-  async request<T>(type: ExtensionRequestType, payload?: unknown, timeoutMs = 10000): Promise<T> {
-    return this.daemonRequest<T>(
-      {
-        type: "extension.request",
-        request: { type, payload }
-      },
-      timeoutMs
-    );
+  async request<T>(type: ExtensionRequestType, payload?: unknown, timeoutMs = this.timeoutMs): Promise<T> {
+    return this.daemonRequest<T>({ type: "extension.request", request: { type, payload }, timeoutMs }, timeoutMs + 1000);
   }
 
   close(): void {
-    this.socket?.close();
+    this.closed = true;
+    this.socket?.terminate();
     this.socket = null;
-    this.connecting = null;
-
-    for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("Daemon bridge closed"));
-      this.pending.delete(id);
-    }
+    this.rejectPending(new BridgeError("unknown_outcome", "Daemon connection closed; in-flight operation outcome is unknown. Observe again before retrying."));
   }
 
-  private async daemonRequest<T>(
-    request: DaemonRequestInput,
-    timeoutMs = 10000
-  ): Promise<T> {
+  private async daemonRequest<T>(request: DaemonRequestInput, timeoutMs: number): Promise<T> {
     const socket = await this.ensureSocket();
     const id = randomUUID();
-    const message = { id, ...request } as DaemonRequest;
-
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Daemon request timed out: ${request.type}`));
+        reject(new BridgeError("unknown_outcome", "Daemon response timed out; operation outcome is unknown. Observe again before retrying."));
       }, timeoutMs);
-
-      this.pending.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timer
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
+      socket.send(JSON.stringify({ id, ...request }), (error) => {
+        if (error) this.rejectPending(new BridgeError("unknown_outcome", "Daemon send failed; operation outcome is unknown. Observe again before retrying."));
       });
-
-      socket.send(JSON.stringify(message));
     });
   }
 
-  private async ensureSocket(): Promise<WebSocket> {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      return this.socket;
-    }
-
-    if (this.connecting) {
-      return this.connecting;
-    }
-
+  private ensureSocket(): Promise<WebSocket> {
+    if (this.closed) return Promise.reject(new Error("Braiser bridge is closed"));
+    if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve(this.socket);
+    if (this.connecting) return this.connecting;
     this.connecting = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(`ws://${this.host}:${this.port}`);
-
-      socket.on("open", () => {
-        this.socket = socket;
-        this.connecting = null;
-        resolve(socket);
+      const socket = new WebSocket(this.url, {
+        headers: { Authorization: `Bearer ${this.token}` }, handshakeTimeout: this.connectTimeoutMs
       });
-
-      socket.on("message", (data) => {
-        this.handleMessage(data.toString());
-      });
-
-      socket.on("close", () => {
+      this.socket = socket;
+      let opened = false;
+      const fail = (error: Error) => {
+        if (!opened) reject(error);
         if (this.socket === socket) {
-          this.socket = null;
-        }
-        this.rejectPending(new Error("Daemon connection closed"));
-      });
-
-      socket.on("error", (error) => {
-        if (this.connecting) {
           this.connecting = null;
-          reject(error);
+          this.socket = null;
+          this.rejectPending(error);
+        }
+      };
+      socket.on("open", () => { opened = true; this.connecting = null; resolve(socket); });
+      socket.on("unexpected-response", (_request, response) => {
+        response.resume();
+        fail(new BridgeError("unauthorized", `Daemon refused connection (HTTP ${response.statusCode}); check the token and restart an outdated daemon`));
+        socket.terminate();
+      });
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        fail(opened
+          ? new BridgeError("unknown_outcome", "Daemon connection failed; operation outcome is unknown. Observe again before retrying.")
+          : new BridgeError(error.code === "ECONNREFUSED" ? "unavailable" : "protocol", `Cannot connect to Braiser daemon at ${this.url}: ${error.message}`));
+      });
+      socket.on("close", () => fail(new BridgeError("unknown_outcome", "Daemon disconnected; operation outcome is unknown. Observe again before retrying.")));
+      socket.on("message", (data) => {
+        if (this.socket !== socket) return;
+        let response: DaemonResponse;
+        try {
+          response = JSON.parse(data.toString()) as DaemonResponse;
+          if (!response || typeof response.id !== "string" || typeof response.ok !== "boolean") throw new Error();
+        } catch {
+          fail(new BridgeError("protocol", "Invalid response from Braiser daemon"));
+          socket.terminate();
           return;
         }
-
-        this.rejectPending(error);
+        const pending = this.pending.get(response.id);
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        this.pending.delete(response.id);
+        if (response.ok) pending.resolve(response.result);
+        else pending.reject(new Error(response.error ?? "Daemon request failed"));
       });
     });
-
     return this.connecting;
   }
 
-  private handleMessage(rawData: string): void {
-    const response = JSON.parse(rawData) as DaemonResponse;
-    const pending = this.pending.get(response.id);
-    if (!pending) {
-      return;
-    }
-
-    clearTimeout(pending.timer);
-    this.pending.delete(response.id);
-
-    if (response.ok) {
-      pending.resolve(response.result);
-      return;
-    }
-
-    pending.reject(new Error(response.error ?? "Daemon request failed"));
-  }
-
   private rejectPending(error: Error): void {
-    for (const [id, pending] of this.pending) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-      this.pending.delete(id);
-    }
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
+    this.pending.clear();
   }
 }

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { clientConfig } from "./config.js";
+import { clientToken } from "./auth.js";
+import { ensureDaemon } from "./lifecycle.js";
 import { ExtensionBridge } from "./websocket.js";
 import type { ActiveTabInfo, AgentHtmlSnapshot, BrowserTabInfo, BrowserTabList, ReadablePage } from "./protocol.js";
 import {
@@ -21,11 +22,13 @@ type CliCommand =
 
 type DownloadTarget = "dom" | "observe" | "both" | "markdown" | "preprocessed-html";
 
-const bridge = new ExtensionBridge();
+const config = clientConfig();
+const bridge = new ExtensionBridge(config.url, await clientToken(config), config.requestTimeoutMs);
 
 try {
   const command = parseCommand(process.argv.slice(2));
-  await ensureDaemon(bridge);
+  if (config.mode === "remote" && command.type === "download") throw new Error("File exports are unavailable in remote mode; use MCP observation and reading tools");
+  await ensureDaemon(bridge, config);
   await ensureExtensionConnected(bridge);
   await runCommand(command, bridge);
 } catch (error) {
@@ -156,33 +159,4 @@ async function ensureExtensionConnected(bridge: ExtensionBridge): Promise<void> 
   if (!(await bridge.isExtensionConnected())) {
     throw new Error("Chrome extension is not connected to braiser-daemon");
   }
-}
-
-async function ensureDaemon(bridge: ExtensionBridge): Promise<void> {
-  if (await bridge.isDaemonConnected()) {
-    return;
-  }
-
-  const daemonPath = fileURLToPath(new URL("./daemon.js", import.meta.url));
-  const child = spawn(process.execPath, [daemonPath], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true
-  });
-  child.unref();
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    await sleep(150);
-    if (await bridge.isDaemonConnected()) {
-      return;
-    }
-  }
-
-  throw new Error("braiser-daemon is not available");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

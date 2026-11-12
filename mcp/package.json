@@ -6,7 +6,8 @@
   "bin": {
     "braiser-mcp": "dist/server.js",
     "braiser-daemon": "dist/daemon.js",
-    "braiser-cli": "dist/cli.js"
+    "braiser-cli": "dist/cli.js",
+    "braiser": "dist/remote.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

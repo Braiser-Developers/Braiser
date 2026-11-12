@@ -42,3 +42,13 @@ const fileName = `${dateStamp()}-${slugify(pageName)}.md`;
 ## 同步文件架构文档
 
 如果新增、删除、移动文件，或者改变某个模块的主要职责，同步更新 `docs/file_architecture.md`。
+
+## 远程改造后的职责补充
+
+依据：[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0003](../user-spec/decisions/0003-credentials-and-tools.md)、[D-0004](../user-spec/decisions/0004-foreground-ssh-launcher.md)。
+
+- daemon.ts 保留进程入口，监听、认证、路由移到 daemon-server.ts。
+- config.ts、auth.ts、policy.ts 分别管理配置、凭据和能力集合。
+- lifecycle.ts 统一 MCP 和 CLI 的本机自动启动，远程模式禁止启动 daemon。
+- remote.ts 只编排前台远程访问，SSH 子进程与转发确认由 ssh-tunnel.ts 管理。
+- 远程工具限制同时作用于列表、调用和 daemon，不能只隐藏工具名。

@@ -1,349 +1,55 @@
-# 文件架构与职责说明
-
-本文档记录当前 MVP 的文件结构、模块职责和主要运行路径。代码职责边界以 `docs/code_design_guidelines.md` 为准：调用层只编排行为，具体兜底、清洗、存储、浏览器访问分别放在对应模块里。
-
-## 顶层结构
-
-```text
-Braiser/
-  extension/
-  mcp/
-  scripts/
-  docs/
-  package.json
-  requirements-markdown.txt
-  package-lock.json
-  LICENSE
-  .gitignore
-```
-
-## `extension/`
-
-Chrome 扩展部分。它负责通过 `debug.html` 连接本地 `braiser-daemon`，并把 daemon 发来的请求转发到浏览器页面。
-
-当前约定不是读取 Chrome active tab，而是读取 Chrome 中标题为 `Braised` 的 tab group 里的 agent focus tab。这个焦点 tab 的 id 保存在 `chrome.storage.local` 的 `focusedBraisedTabId` 中；如果保存的 tab 不存在，会按 Chrome 标签栏中的 `windowId` 和 `index` 排序后回退到最后一页。
-
-```text
-extension/
-  debug.html
-  debug.css
-  manifest.json
-  popup.html
-  popup.css
-  tsconfig.json
-  src/
-    background.ts
-    content.ts
-    debug.ts
-    popup.ts
-    protocol.ts
-  dist/
-```
-
-### `extension/manifest.json`
-
-Chrome 扩展配置文件。它声明 Manifest V3 service worker、popup 入口和权限。
-
-主要权限：
-
-- `activeTab`：保留给扩展交互场景使用。
-- `debugger`：仅用于 `debug.cdp_command` 调试工具，临时 attach 目标 tab 发送 CDP 命令。
-- `scripting`：向目标 tab 注入 `dist/content.js`。
-- `storage`：保存扩展侧连接状态。
-- `tabGroups`：查找标题为 `Braised` 的 tab group。
-- `tabs`：创建、更新、激活和关闭 `Braised` tab group 中的页面。
-- `host_permissions: ["<all_urls>"]`：允许对普通网页注入 content script。
-- `host_permissions: ["ws://127.0.0.1:17832/*"]`：允许连接本地 `braiser-daemon` 的扩展端口。
-
-### `extension/debug.html` 和 `extension/src/debug.ts`
-
-可见的调试 bridge 页面。它负责持有和 `braiser-daemon` 的 WebSocket 长连接。
-
-主要职责：
-
-- 通过 WebSocket 连接 `ws://127.0.0.1:17832`。
-- 接收 daemon 发来的扩展请求。
-- 通过 runtime message 转发给 background 执行。
-- 将 background 的执行结果返回给 daemon。
-- 将连接状态写入 `chrome.storage.local`。
-- 显示简单连接日志，方便调试。
-
-只要这个页面保持打开，WebSocket 就不会因为 MV3 background service worker 空闲休眠而断开。
-
-### `extension/src/background.ts`
-
-扩展侧浏览器能力执行层，运行在 MV3 background service worker 中。
-
-主要职责：
-
-- 接收 debug bridge 页面转发的扩展请求。
-- 定位标题为 `Braised` 的 Chrome tab group。
-- 维护 agent focus tab；必要时回退到该 group 中最后一个 tab。
-- 支持列出、创建、打开、关闭和切换 `Braised` 组内 tab。
-- 必要时向目标页面注入 `dist/content.js`。
-- 在 observe 前用 CDP `isClickable` 信号补充 content script 难以通过 selector 发现的委托点击元素。
-  - 通过 `Runtime.enable` 收集 execution context，并用 `globalThis.__braiserCdpBridge` probe 找到 content script isolated world。
-  - 通过 `DOMSnapshot.captureSnapshot` 读取 `nodes.isClickable` 和 `backendNodeId`。
-  - 使用 `DOM.resolveNode` 将 `backendNodeId` 解析为 content script world 中的 JS node wrapper。
-  - 使用 `Runtime.callFunctionOn` 调用 content script 固定 bridge 函数，把精确 DOM Element 注册进 observe registry；不向真实 DOM 写临时属性。
-- 转发 `page.extract_readable_text`、`browser.observe` 和 `browser.act` 到 content script。
-- 使用 observe registry bridge 解析 `browser.upload` 的 file input，并通过 CDP 设置本地文件。
-- 执行 `debug.inject_js` 调试请求，将 JavaScript 注入目标页面 MAIN world，并返回 JSON 可序列化结果。
-- 执行 `debug.cdp_command` 调试请求，临时 attach 目标 tab，发送 CDP 命令后 detach。
-- 返回浏览器结果给 debug bridge 页面。
-- 响应 popup 的状态查询和调试下载请求。
-
-### `extension/src/content.ts`
-
-注入到目标网页中的 content script。
-
-主要职责：
-
-- 读取页面 `title`、`url`、完整 DOM HTML 和可见文本。
-- 生成包含页面 DOM 结构和交互元素编号的 `agent-html` 页面快照。
-- 为可操作元素分配 `data-eid`。
-- 维护 `snapshotId + elementId -> DOM Element` 的页面内 registry。
-- 根据 `browser.act` 请求执行点击、输入、选择、切换、聚焦和滚动。
-- 在 observe 中保留隐藏的 `input[type=file]`，并向 background bridge 暴露受 snapshot 约束的精确 DOM Element。
-- 将页面读取或操作结果返回给 background service worker。
-
-### `extension/src/popup.ts`
-
-扩展 popup UI 的控制逻辑。
-
-主要职责：
-
-- 查询扩展与 daemon 的连接状态。
-- 显示目标页面的标题和 URL。
-- 打开 `debug.html`，让浏览器插件保持与 daemon 的连接。
-- 手动下载目标页面运行时 DOM。
-- 手动下载 `browser.observe` 的 agent-html 输出，方便调试。
-
-### `extension/src/protocol.ts`
-
-扩展侧共享类型定义。
-
-覆盖内容：
-
-- 扩展 WebSocket 请求与响应。
-- debug bridge 与 background 之间的 runtime message。
-- popup 请求与状态。
-- Braised tab group 的 tab 信息、列表和 tab 管理输入。
-- 可读页面数据。
-- agent-html 快照。
-- `browser.act` 输入和结果。
-- `debug.inject_js` 输入和结果。
-- `debug.cdp_command` 输入和结果。
-
-### `extension/dist/`
-
-TypeScript 构建产物目录。Chrome 实际加载这里的 JavaScript 文件，不应手动编辑。
-
-## `mcp/`
-
-本地 MCP 和 daemon 代码。`braiser-mcp` 通过 MCP stdio 与本地 Agent 通信；`braiser-daemon` 负责浏览器桥接，并被多个 MCP server 复用。
-
-```text
-mcp/
-  package.json
-  tsconfig.json
-  src/
-    cli.ts
-    daemon.ts
-    server.ts
-    websocket.ts
-    tools.ts
-    markdown.ts
-    cleaner.ts
-    storage.ts
-    protocol.ts
-  dist/
-```
-
-### `mcp/src/cli.ts`
-
-本地调试和下载 CLI 入口。
-
-主要职责：
-
-- 连接 daemon 和扩展。
-- 下载运行时 DOM、observe 结果、Markdown 或 Markdown 预处理 HTML 到 `downloads/`。
-- 列出 `Braised` tab group 页面。
-- 切换 agent focus tab。
-
-### `mcp/src/daemon.ts`
-
-本地 daemon 入口。
-
-主要职责：
-
-- 监听扩展端口 `127.0.0.1:17832`。
-- 监听 MCP client 端口 `127.0.0.1:17833`。
-- 维护当前 Chrome 扩展 debug bridge socket。
-- 接收多个 MCP client 的请求。
-- 为转发给扩展的请求生成新的 request id。
-- 将扩展响应路由回发起请求的 MCP client。
-- 在扩展断开、client 断开或超时时清理 pending request。
-
-### `mcp/src/server.ts`
-
-MCP 服务入口。
-
-主要职责：
-
-- 启动 MCP stdio server。
-- 启动时尝试连接 daemon。
-- 如果 daemon 不存在，后台启动 `mcp/dist/daemon.js`。
-- 注册可用 tools。
-- 把 tool 调用转发给 `tools.ts`。
-
-### `mcp/src/websocket.ts`
-
-MCP server 到 daemon 的 WebSocket client。
-
-主要职责：
-
-- 连接 `ws://127.0.0.1:17833`。
-- 查询 daemon 是否可用。
-- 查询 Chrome 扩展是否已连接 daemon。
-- 将 MCP tool 请求封装为 daemon 请求。
-- 将 daemon 响应匹配回对应的 MCP tool 调用。
-- 管理超时和连接关闭时的 pending request。
-
-### `mcp/src/tools.ts`
-
-MCP tool 行为编排层。
-
-当前 tools：
-
-- `braiser.status`
-- `browser.get_active_tab`
-- `browser.list_tabs`
-- `browser.create_tab`
-- `browser.open_tab`
-- `browser.close_tab`
-- `browser.switch_tab`
-- `browser.download`
-- `browser.observe`
-- `browser.act`
-- `browser.upload`
-- `debug.inject_js`
-- `debug.cdp_command`
-- `page.extract_readable_text`
-- `page.save_current_page`
-
-注意：`browser.get_active_tab` 名称暂时保留是为了兼容旧调用方；实际读取的是 `Braised` tab group 的当前 agent focus tab。
-`page.extract_readable_text` 名称暂时保留；MCP tool 层会把 content script 返回的运行时 DOM HTML 交给 Markdown pipeline，并在 `text` 字段返回 Markdown。
-`debug.inject_js` 和 `debug.cdp_command` 只用于调试目的，不应作为常规页面自动化或稳定业务接口使用。
-
-### `mcp/src/markdown.ts`
-
-运行时 DOM 到 Markdown 的共享 pipeline 模块。
-
-主要职责：
-
-- 将 content script 返回的运行时 DOM HTML 写入临时文件。
-- 调用 HTML 预处理脚本和 MarkItDown 包装脚本。
-- 为 `page.extract_readable_text`、`page.save_current_page` 和 CLI 下载命令复用同一套 Markdown 转换逻辑。
-- 管理 Markdown 转换的临时文件和 `downloads/` 输出文件名。
-
-### `mcp/src/cleaner.ts`
-
-页面文本清洗和 Markdown 格式化模块。
-
-主要职责：
-
-- 规范化空白字符。
-- 清理扩展抽取到的可见文本。
-- 将 `CleanPage` 格式化为 Markdown。
-
-### `mcp/src/storage.ts`
-
-本地页面保存模块。
-
-主要职责：
-
-- 将页面 Markdown 写入 `~/.braiser/pages/`。
-- 根据 URL host 或页面标题生成文件名。
-- 将最终文件名兜底留给 `slugify()`，避免调用层重复兜底逻辑。
-
-### `mcp/src/protocol.ts`
-
-MCP/daemon 侧共享类型定义。
-
-覆盖内容：
-
-- 扩展端口和 daemon client 端口常量。
-- daemon 请求和响应。
-- 扩展请求和响应。
-- Braised tab group 的 tab 信息、列表和 tab 管理输入。
-- 可读页面数据。
-- 清洗后的页面数据。
-- agent-html 快照。
-- `browser.act` 输入和结果。
-- `debug.inject_js` 输入和结果。
-- `debug.cdp_command` 输入和结果。
-
-### `mcp/dist/`
-
-本地 MCP 和 daemon 的构建产物目录，由 TypeScript 编译生成，不应手动编辑。
-
-## `scripts/`
-
-项目本地辅助脚本目录，不由 Chrome 直接加载。
-
-- `setup-markdown.mjs`：创建 `.venv-markdown/`，并安装 `requirements-markdown.txt`。
-- `preprocess-markdown-html.py`：在 Markdown 转换前规范化运行时 DOM HTML，将带 annotation 的 KaTeX 节点替换为 Braiser 标记的数学节点。
-- `markitdown-braiser.py`：包装固定版本的 MarkItDown HTML 转换流程，并让 Braiser 标记的数学节点避开 markdownify 的普通文本转义。
-
-这些脚本的接口协议记录在 `docs/markdown_pipeline.md`。
-
-## `docs/`
-
-项目文档目录。
-
-- `project_positioning.md`：项目定位与长期展望。
-- `mvp_architecture.md`：当前 MVP 架构说明。
-- `file_architecture.md`：当前文件结构和职责说明。
-- `code_design_guidelines.md`：代码完成后的设计自查规则。
-- `markdown_pipeline.md`：HTML normalization 和 Markdown conversion 的接口协议。
-- `todo/`：待实现或讨论中的功能设计草稿。
-
-## 根目录 `package.json`
-
-整个项目的快捷脚本配置：
-
-- `npm run build`：构建扩展、MCP server 和 daemon。
-- `npm run build:extension`：只构建 Chrome 扩展。
-- `npm run build:mcp`：只构建 MCP server 和 daemon。
-- `npm run check`：当前等同于完整构建。
-- `npm run setup:markdown`：创建 Markdown 转换用的本地 Python 环境。
-- `npm run download:dom`：下载当前 agent focus tab 的运行时 DOM HTML。
-- `npm run download:observe`：下载当前 agent focus tab 的 observe agent-html。
-- `npm run download:markdown` / `npm run download:md`：下载当前 agent focus tab 的运行时 DOM Markdown。
-- `npm run download:preprocessed-html` / `npm run download:debug-html`：下载 Markdown 转换前的预处理 HTML。
-- `npm run download:both`：同时下载运行时 DOM HTML 和 observe agent-html。
-- `npm run tabs`：列出 `Braised` tab group 中的页面和当前 agent focus tab。
-- `npm run switch-tab -- <tabId>`：切换 agent focus tab。
-- `npm run mcp`：运行已编译的 MCP 服务。
-- `npm run daemon`：运行已编译的 daemon。
-
-## 运行流程
-
-1. 用户运行 `npm run build` 构建项目。
-2. 用户将 `extension/` 作为未打包扩展加载到 Chrome。
-3. Chrome 中准备一个标题为 `Braised` 的 tab group；Braiser 使用当前 agent focus tab，缺省回退到该组最后一个 tab。
-4. 用户运行 `npm run mcp`，或由 Agent 启动 `mcp/dist/server.js`。
-5. `braiser-mcp` 连接 `ws://127.0.0.1:17833`。
-6. 如果 daemon 不存在，`braiser-mcp` 自动后台启动 `mcp/dist/daemon.js`。
-7. `braiser-daemon` 监听 `17832` 和 `17833`。
-8. 用户从 popup 打开 `debug.html`。
-9. debug 页面连接到 `ws://127.0.0.1:17832`。
-10. 本地 Agent 调用 MCP tool。
-11. `braiser-mcp` 将请求转发给 daemon。
-12. daemon 将请求转发给 debug 页面。
-13. debug 页面把请求转发给 background。
-14. background 选择 `Braised` 组中的 agent focus tab，注入或复用 content script。
-15. content script 读取页面、生成 agent-html 或执行 act。
-16. 结果沿原链路返回给 MCP server。
-17. MCP server 清洗、保存或直接返回结果给 Agent。
+# 文件架构与职责
+
+依据：[D-0001](../user-spec/decisions/0001-existing-browser-architecture.md)、[D-0002](../user-spec/decisions/0002-remote-access.md)。
+
+## 维护层
+
+| 文件 | 职责 |
+|---|---|
+| [AGENTS.md](../AGENTS.md) | 作者合作规则，属于 user spec |
+| [user-spec/README.md](../user-spec/README.md) | 作者预期和决策维护规则 |
+| [user-spec/overview.md](../user-spec/overview.md) | 本次确认的作者预期 |
+| [user-spec/decisions/README.md](../user-spec/decisions/README.md) | 实现决策索引 |
+| [references/README.md](../references/README.md) | 外部事实索引 |
+| [docs/README.md](README.md) | 当前技术文档和历史材料索引 |
+
+## MCP 与本机服务
+
+| 文件 | 职责 |
+|---|---|
+| [server.ts](../mcp/src/server.ts) | MCP stdio 入口，按模式注册并执行工具 |
+| [tools.ts](../mcp/src/tools.ts) | 工具编排、入参验证、Markdown 转换与本机文件操作 |
+| [config.ts](../mcp/src/config.ts) | 本机/远程模式、回环端点和超时配置验证 |
+| [auth.ts](../mcp/src/auth.ts) | 本机凭据生成、文件读取、Bearer 比较 |
+| [policy.ts](../mcp/src/policy.ts) | MCP 和 daemon 共用远程工具允许集合 |
+| [lifecycle.ts](../mcp/src/lifecycle.ts) | 本机 daemon 就绪检查与按需启动；远程不启动 daemon |
+| [websocket.ts](../mcp/src/websocket.ts) | 认证 WebSocket client、请求关联、超时、断线处理 |
+| [daemon.ts](../mcp/src/daemon.ts) | daemon 进程入口，准备凭据、监听并处理退出 |
+| [daemon-server.ts](../mcp/src/daemon-server.ts) | 两个回环监听端口、客户端认证和身份、扩展请求路由 |
+| [remote.ts](../mcp/src/remote.ts) | 前台远程访问入口，编排 daemon、隧道与状态显示 |
+| [ssh-tunnel.ts](../mcp/src/ssh-tunnel.ts) | 参数校验、独立 OpenSSH master、转发确认和子进程清理 |
+| [cli.ts](../mcp/src/cli.ts) | 原调试/下载 CLI，复用连接配置和生命周期；远程禁止文件导出 |
+| [protocol.ts](../mcp/src/protocol.ts) | MCP/daemon 与扩展消息类型；认证状态协议 v2、请求超时 |
+| [markdown.ts](../mcp/src/markdown.ts) | MCP 所在主机的 DOM → Markdown 共享管线及临时文件清理 |
+| [cleaner.ts](../mcp/src/cleaner.ts) | 文本清洗与格式化 |
+| [storage.ts](../mcp/src/storage.ts) | 本机模式保存页面到 ~/.braiser/pages |
+| [remote.test.mjs](../mcp/test/remote.test.mjs) | 随机回环端口、模拟扩展、真实 MCP stdio 和模拟 SSH 验证 |
+
+## Chrome 扩展
+
+扩展本次没有代码变动。Bridge 页面保持 WebSocket，避免 MV3 service worker 休眠中断长连接。
+
+| 文件 | 职责 |
+|---|---|
+| [manifest.json](../extension/manifest.json) | MV3 权限和入口 |
+| [debug.ts](../extension/src/debug.ts) | 连接本机 17832，转发 runtime message，显示状态日志 |
+| [background.ts](../extension/src/background.ts) | Braised 标签组焦点与标签管理、浏览器下载/上传、CDP 与脚本执行；observe 时补充 CDP isClickable |
+| [content.ts](../extension/src/content.ts) | 生成 agent-html、维护快照 registry、执行有限动作集合 |
+| [popup.ts](../extension/src/popup.ts) | 状态 UI、打开 Bridge、手工导出 |
+| [protocol.ts](../extension/src/protocol.ts) | 扩展内部消息类型；网络客户端认证不涉及扩展协议 |
+
+## 辅助脚本与构建
+
+[setup-markdown.mjs](../scripts/setup-markdown.mjs) 创建项目 Python 环境；[预处理脚本](../scripts/preprocess-markdown-html.py) 和 [MarkItDown 包装](../scripts/markitdown-braiser.py) 保留数学内容。依据见 [D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。
+
+[根 package.json](../package.json) 提供 build、mcp、daemon、remote、test 和原 CLI 命令。[mcp/package.json](../mcp/package.json) 保留原 bin 并增加 braiser 入口。构建输出到 extension/dist 与 mcp/dist，不跟踪产物，不直接编辑。

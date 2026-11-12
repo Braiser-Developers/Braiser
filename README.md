@@ -1,6 +1,18 @@
 # Braiser
 
-Braiser 是一个面向本地 AI 浏览器 Agent 的安全、结构化和记忆层。当前 MVP 保持很小，但已经拆出了本地 daemon，避免多个 Codex/MCP 会话争抢同一个浏览器 WebSocket 端口。
+Braiser 是让 Agent 操作浏览器的轻量级 MCP 工具。支持本机 Agent，以及通过 SSH 反向隧道连接本机浏览器的远程 Linux Agent。MCP 与本地 daemon 分开，多个 MCP 会话可复用桥接连接；页面焦点仍共享，同一时间使用一个操作 Agent。
+
+作者预期见 [user spec](user-spec/README.md)，维护规则见 [AGENTS.md](AGENTS.md)，设计选择见 [决策索引](user-spec/decisions/README.md)。旧远期定位保留为历史材料，见 [材料归位](docs/materials-inventory.md)。
+
+## 远程访问
+
+在浏览器主机完成构建后：
+
+```bash
+npm run remote -- start --ssh user@server
+```
+
+入口准备 daemon 并建立前台 SSH 隧道；退出只关闭此次隧道。本机生成独立的 local-token 和 remote-token，远程 MCP 只使用 remote-token。升级旧版本需要构建并重启 daemon/MCP；启动器不会自动停止旧服务。远程 MCP 的配置、凭据准备、首版工具范围和故障定位见 [远程访问指南](docs/remote-access.md)。
 
 ```text
 本地 Agent / Codex
@@ -179,6 +191,10 @@ npm run switch-tab -- <tabId>
 
 ## 说明
 
-当前 MVP 不做复杂权限系统、远程连接、账号体系、云同步或多用户管理。它只验证一件事：本地 Agent 是否能通过 MCP 稳定、有价值地观察并操作浏览器页面。
+当前 MVP 支持基于 SSH 的远程连接和 token 身份区分；不做复杂权限系统、账号体系、云同步或多使用者管理。远程首版提供浏览、点击、填写和读取，不提供文件传输与任意 JS/CDP 调试工具。
+
+## 验证
+
+`npm test` 构建代码并运行回环桥接、MCP stdio 和模拟 SSH 测试，不连接真实浏览器或服务器。实际启用仍需确认服务器转发策略和浏览器连接。
 
 更多设计说明见 `docs/`。

@@ -1,6 +1,6 @@
 # HTML Normalization 与 Markdown Conversion 协议
 
-本文档定义“当前网页运行时 DOM -> Markdown”的本地接口协议。CLI 和未来 MCP tool
+本文档定义“当前网页运行时 DOM -> Markdown”的本地接口协议。CLI 和 MCP tool
 都应该复用同一套协议，不应在其他层重新实现 KaTeX 或 MarkItDown 处理逻辑。
 
 ## 依赖协议
@@ -163,5 +163,9 @@ downloads/<timestamp>-<page>-runtime-dom-preprocessed.html
 - `mcp/src/cli.ts` 负责编排 pipeline 和生成文件名。
 - `scripts/preprocess-markdown-html.py` 负责 HTML normalization。
 - `scripts/markitdown-braiser.py` 负责 MarkItDown 集成和数学节点 conversion。
-- 未来暴露给 MCP 的 Markdown tool 应调用同一条 normalization/conversion 路径，不应在
+- MCP 的 Markdown tool 调用同一条 normalization/conversion 路径，不应在
   `tools.ts`、`background.ts` 或 `content.ts` 内重新实现。
+
+## 远程模式
+
+依据：[D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。MCP 在 Linux 时，转换也在 Linux 运行；标准安装仍需准备项目本地 Python 环境。读取结果直接返回 Agent，远程不暴露保存页面工具。
