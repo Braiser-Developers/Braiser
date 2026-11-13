@@ -60,15 +60,42 @@ function states(node: AriaNode): string {
   return parts.map(part => ` [${part}]`).join("");
 }
 
+// Characters that change a URL's meaning or would break the outline format stay percent-encoded.
+const KEEP_ENCODED = new Set(" ;/?:@&=+$,#%()[]\"<>");
+const encoder = new TextEncoder();
+
+/** Shows %E4%B8%AD-style escapes as the characters they stand for, like browsers do (lossless). */
+export function decodeForDisplay(url: string): string {
+  return url.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    const bytes = run.match(/%[0-9A-Fa-f]{2}/g)!;
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes, byte => parseInt(byte.slice(1), 16)));
+    } catch {
+      return run;
+    }
+    let offset = 0;
+    let result = "";
+    for (const char of text) {
+      const length = encoder.encode(char).length;
+      result += KEEP_ENCODED.has(char) || /[\s\p{C}]/u.test(char) ? bytes.slice(offset, offset + length).join("") : char;
+      offset += length;
+    }
+    return result;
+  });
+}
+
+/** Same-origin links show only path, query and hash; links within the page show only the hash. */
 export function shortUrl(url: string, pageUrl?: string): string {
-  if (!pageUrl) return url;
+  if (!pageUrl) return decodeForDisplay(url);
   try {
     const target = new URL(url, pageUrl);
     const page = new URL(pageUrl);
-    if (target.origin !== page.origin) return target.href;
-    return `${target.pathname}${target.search}${target.hash}`;
+    if (target.origin !== page.origin) return decodeForDisplay(target.href);
+    if (target.hash && target.pathname === page.pathname && target.search === page.search) return decodeForDisplay(target.hash);
+    return decodeForDisplay(`${target.pathname}${target.search}${target.hash}`);
   } catch {
-    return url;
+    return decodeForDisplay(url);
   }
 }
 
@@ -168,24 +195,25 @@ function renderNode(node: AriaNode, depth: number, insidePointerTarget: boolean,
   if (node.name) header += ` ${quote(node.name)}`;
   header += states(node);
   if (actionable) header += ` [${ctx.hooks.elementId(node)}]`;
-  if (node.props.url !== undefined) header += ` → ${shortUrl(node.props.url, ctx.options.pageUrl)}`;
   if (node.props.placeholder !== undefined) header += ` placeholder=${quote(node.props.placeholder)}`;
+  // The URL always ends the line so that a following ":" or text cannot be read as part of it.
+  const url = node.props.url !== undefined ? ` → ${shortUrl(node.props.url, ctx.options.pageUrl)}` : "";
 
   const children = repeatsName(node, childPointer) ? [] : node.children.filter(child => typeof child !== "string" || child.trim());
   if (children.length === 0) {
-    ctx.lines.push(header);
+    ctx.lines.push(`${header}${url}`);
     return;
   }
   if (children.length === 1 && typeof children[0] === "string") {
-    ctx.lines.push(`${header}: ${children[0]}`);
+    ctx.lines.push(`${header}: ${children[0]}${url}`);
     return;
   }
   if (canInline(node, childPointer)) {
     const parts = children.map(child => typeof child === "string" ? child : renderInlineChild(child, childPointer, ctx));
-    ctx.lines.push(`${header}: ${joinInline(parts).replace(/\s+/g, " ")}`);
+    ctx.lines.push(`${header}: ${joinInline(parts).replace(/\s+/g, " ")}${url}`);
     return;
   }
-  ctx.lines.push(`${header}:`);
+  ctx.lines.push(`${header}:${url}`);
   for (const child of children) {
     if (typeof child === "string") ctx.lines.push(`${"  ".repeat(depth + 1)}- text: ${child}`);
     else renderNode(child, depth + 1, childPointer, ctx);

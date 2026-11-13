@@ -78,11 +78,21 @@ test('phrasing wrappers such as superscript citations stay inline', () => {
   ]);
   const text = render.renderAriaTree(tree, hooks(), { pageUrl: 'https://w.org/wiki/Markdown' });
   assert.equal(text, [
-    '- paragraph: Markdown [[9]](E1 /wiki/Markdown#cite-9) is a [lightweight markup language](E2 /wiki/LML) for text.',
+    '- paragraph: Markdown [[9]](E1 #cite-9) is a [lightweight markup language](E2 /wiki/LML) for text.',
     '- list:',
     '  - listitem:',
     '    - link "Item" [E3]'
   ].join('\n'));
+});
+
+test('URLs are shown decoded where lossless, same-page anchors are shortened, and the URL ends the line', () => {
+  const page = 'https://zh.wikipedia.org/wiki/Markdown';
+  assert.equal(render.shortUrl('https://zh.wikipedia.org/wiki/%E6%A0%87%E8%AE%B0%E8%AF%AD%E8%A8%80', page), '/wiki/标记语言');
+  assert.equal(render.shortUrl('https://zh.wikipedia.org/wiki/Markdown#%E5%8E%86%E5%8F%B2', page), '#历史');
+  assert.equal(render.shortUrl('/login?return_to=https%3A%2F%2Fgithub.com%2Fa%20b', page), '/login?return_to=https%3A%2F%2Fgithub.com%2Fa%20b');
+  assert.equal(render.shortUrl('https://other.org/a%E2%80%8Bb%ZZ', page), 'https://other.org/a%E2%80%8Bb%ZZ');
+  const tree = root([node('link', 'Home', [node('img', 'logo', [], { noRef: true }), node('generic', '', ['Welcome back'], { pointer: true })], { pointer: true, props: { url: '/home' } })]);
+  assert.equal(render.renderAriaTree(tree, hooks(), { pageUrl: page }), '- link "Home" [E1]: → /home\n  - img "logo"\n  - generic: Welcome back');
 });
 
 test('pointer targets get one id for the outermost element; iframes become placeholders', () => {
