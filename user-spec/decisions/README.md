@@ -71,7 +71,7 @@
 | [D-0001](0001-existing-browser-architecture.md) | 保留既有浏览器桥接与 Observe/Act 架构 | 部分被取代（→ [D-0016](0016-observe-output-format.md)） |
 | [D-0002](0002-remote-access.md) | 采用 SSH 反向隧道并区分本机与远程模式 | 有效 |
 | [D-0003](0003-credentials-and-tools.md) | 用两种凭据在 daemon 和 MCP 同时限制远程能力 | 有效 |
-| [D-0004](0004-foreground-ssh-launcher.md) | 用前台入口管理一条独立 SSH 隧道 | 有效 |
+| [D-0004](0004-foreground-ssh-launcher.md) | 用前台入口管理一条独立 SSH 隧道 | 已取代（→ [D-0018](0018-remote-tunnel-switch.md)） |
 | [D-0005](0005-extension-replacement.md) | 修复旧扩展连接取消新连接请求的问题 | 有效 |
 | [D-0006](0006-malformed-bridge-messages.md) | 修复桥接消息解析异常导致进程退出的问题 | 有效 |
 | [D-0007](0007-timeouts-and-reconnection.md) | 统一桥接超时并明确动作结果未知 | 有效 |
@@ -85,3 +85,5 @@
 | [D-0015](0015-extension-bundling-and-e2e.md) | 用 esbuild 打包扩展，用 Playwright 驱动的 Chromium 做端到端测试 | 有效 |
 | [D-0016](0016-observe-output-format.md) | observe 的输出格式与 iframe 拼接 | 有效 |
 | [D-0017](0017-lossless-snapshot-compaction.md) | 不丢可见信息的快照压缩 | 有效 |
+| [D-0018](0018-remote-tunnel-switch.md) | 远程隧道改为开关，由 daemon 维持 | 有效 |
+| [D-0019](0019-background-tab-new-group.md) | 修复新建 Braised 标签组时后台标签页跳到前台 | 有效 |

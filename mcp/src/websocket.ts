@@ -36,6 +36,11 @@ export class ExtensionBridge {
     return status;
   }
 
+  /** Asks the daemon to re-read remote.json (D-0018); requires the local credential. */
+  async reloadTunnel(): Promise<import("./tunnel-supervisor.js").TunnelStatus> {
+    return this.daemonRequest({ type: "daemon.tunnel_reload" }, 10000);
+  }
+
   async isDaemonConnected(): Promise<boolean> {
     try { await this.status(); return true; } catch { return false; }
   }

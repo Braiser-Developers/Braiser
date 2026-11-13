@@ -161,7 +161,7 @@ async function listTabs(): Promise<BrowserTabList> {
 }
 
 async function createTab(input: BrowserCreateTabInput = {}): Promise<BrowserTabInfo> {
-  const group = await getOrCreateBraisedGroup(input.url);
+  const group = await getOrCreateBraisedGroup(input.url, input.active ?? true);
   const url = normalizeOptionalUrl(input.url);
   let tab: ActiveChromeTab;
 
@@ -323,7 +323,8 @@ async function activateTab(tabId: number, windowId: number): Promise<void> {
 }
 
 async function getOrCreateBraisedGroup(
-  initialUrl?: string
+  initialUrl?: string,
+  active = true
 ): Promise<{ group: chrome.tabGroups.TabGroup; createdTab?: ActiveChromeTab }> {
   const groups = await chrome.tabGroups.query({});
   const group = groups
@@ -339,9 +340,10 @@ async function getOrCreateBraisedGroup(
     return { group };
   }
 
+  // D-0019: creating the group must not bring a background tab to the front.
   const createdTab = assertTabId(await chrome.tabs.create({
     url: normalizeOptionalUrl(initialUrl),
-    active: true
+    active
   }));
   const groupId = await chrome.tabs.group({ tabIds: [createdTab.id] });
   const createdGroup = await chrome.tabGroups.update(groupId, { title: TARGET_TAB_GROUP_TITLE });

@@ -168,3 +168,12 @@ test('observe shows current form state, shadow DOM, iframes and full text; act r
   const stale = await bridge.request('browser.act', { snapshotId: snapshot.snapshotId, elementId: 'E1', action: 'click' });
   assert.equal(stale.ok, false);
 });
+
+test('creating the Braised group keeps a background tab in the background (D-0019)', async t => {
+  const { bridge, origin } = await setup(t);
+  const created = await bridge.request('browser.create_tab', { url: `${origin}/next.html`, active: false });
+  assert.equal(created.active, false);
+  const list = await bridge.request('browser.list_tabs');
+  assert.equal(list.tabs.length, 1);
+  assert.equal(list.focusedTabId, created.tabId);
+});

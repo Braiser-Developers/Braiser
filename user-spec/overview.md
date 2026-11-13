@@ -44,4 +44,6 @@ Braiser 是作者大约一年前做的，作者觉得当时做得比较粗糙（
 
 以上预期依据作者在 2026-11-12 的需求说明和范围确认整理。
 
-当前目标环境与连接方案见 [D-0002](decisions/0002-remote-access.md)，统一启动入口见 [D-0004](decisions/0004-foreground-ssh-launcher.md)。
+远程访问平时关着，作者有需要时自己打开（2026-11-14）。
+
+当前目标环境与连接方案见 [D-0002](decisions/0002-remote-access.md)，远程访问的开关见 [D-0018](decisions/0018-remote-tunnel-switch.md)。

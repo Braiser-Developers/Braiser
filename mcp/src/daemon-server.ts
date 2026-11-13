@@ -4,6 +4,7 @@ import { tokenMatches } from "./auth.js";
 import type { Mode } from "./config.js";
 import { toolAllowed } from "./policy.js";
 import type { DaemonRequest, DaemonResponse, ExtensionRequest, ExtensionResponse } from "./protocol.js";
+import type { TunnelStatus } from "./tunnel-supervisor.js";
 
 const requestTypes = new Set([
   "browser.get_active_tab", "browser.list_tabs", "browser.create_tab", "browser.open_tab",
@@ -16,11 +17,18 @@ interface Pending {
   clientId: string;
   timer: NodeJS.Timeout;
 }
+export interface TunnelControl {
+  status(): TunnelStatus;
+  reload(): Promise<TunnelStatus>;
+}
+
 export interface DaemonOptions {
   extensionPort: number;
   clientPort: number;
   localToken: string;
   remoteToken: string;
+  /** D-0018: the reverse SSH tunnel the daemon maintains; only local clients may see or switch it. */
+  tunnel?: TunnelControl;
 }
 
 export class BraiserDaemon {
@@ -29,8 +37,10 @@ export class BraiserDaemon {
   private extension: WebSocket | null = null;
   private readonly pending = new Map<string, Pending>();
   readonly ready: Promise<void>;
+  private readonly tunnel?: TunnelControl;
 
   constructor(options: DaemonOptions) {
+    this.tunnel = options.tunnel;
     if (!options.localToken || !options.remoteToken || options.localToken === options.remoteToken) {
       throw new Error("Daemon requires distinct local and remote tokens");
     }
@@ -124,8 +134,18 @@ export class BraiserDaemon {
     if (request.type === "daemon.status") {
       this.respond(socket, { id: request.id, ok: true, result: {
         daemon: "ok", protocolVersion: 2, clientMode: mode,
-        extensionConnected: this.extension?.readyState === WebSocket.OPEN
+        extensionConnected: this.extension?.readyState === WebSocket.OPEN,
+        ...(mode === "local" && this.tunnel ? { tunnel: this.tunnel.status() } : {})
       } });
+      return;
+    }
+    if (request.type === "daemon.tunnel_reload") {
+      if (mode !== "local") { fail("Remote access settings can only be changed on the browser host"); return; }
+      if (!this.tunnel) { fail("This daemon does not manage a remote tunnel"); return; }
+      this.tunnel.reload().then(
+        status => this.respond(socket, { id: request.id, ok: true, result: status }),
+        error => fail(error instanceof Error ? error.message : String(error))
+      );
       return;
     }
     if (request.type !== "extension.request" || !request.request || !requestTypes.has(request.request.type)) {

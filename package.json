@@ -24,8 +24,8 @@
     "mcp": "node mcp/dist/server.js",
     "daemon": "node mcp/dist/daemon.js",
     "remote": "node mcp/dist/remote.js remote",
-    "test": "npm run build && node --test mcp/test/*.test.mjs extension/test/*.test.mjs",
-    "test:e2e": "npm run build && node --test mcp/test/e2e/*.e2e.mjs"
+    "test": "npm run build && node --test --test-timeout=60000 mcp/test/*.test.mjs extension/test/*.test.mjs",
+    "test:e2e": "npm run build && node --test --test-timeout=180000 mcp/test/e2e/*.e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

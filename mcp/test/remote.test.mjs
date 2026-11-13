@@ -13,7 +13,8 @@ import { clientConfig } from '../dist/config.js';
 import { localCredentials } from '../dist/auth.js';
 import { ensureDaemon } from '../dist/lifecycle.js';
 import { toolsForMode, callTool } from '../dist/tools.js';
-import { parseRemoteArgs, SshTunnel } from '../dist/ssh-tunnel.js';
+import { parseRemoteCommand, SshTunnel } from '../dist/ssh-tunnel.js';
+import { TunnelSupervisor, readRemoteSettings, writeRemoteSettings } from '../dist/tunnel-supervisor.js';
 
 const localToken = 'L'.repeat(43), remoteToken = 'R'.repeat(43);
 const extensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
@@ -43,9 +44,11 @@ test('configuration fails closed and remote never invokes local lifecycle', asyn
   assert.throws(() => clientConfig({ BRAISER_MODE: 'remote' }), /requires/);
   assert.throws(() => clientConfig({ BRAISER_DAEMON_URL: 'ws://0.0.0.0:17833' }), /127.0.0.1/);
   assert.throws(() => clientConfig({ BRAISER_REQUEST_TIMEOUT_MS: 'NaN' }), /TIMEOUT/);
-  assert.throws(() => parseRemoteArgs(['remote', 'start', '--ssh', '-oProxyCommand=x']), /requires/);
-  assert.throws(() => parseRemoteArgs(['remote', 'start', '--ssh', 'host', '--remote-port', '0']), /65535/);
-  assert.deepEqual(parseRemoteArgs(['remote', 'start', '--ssh', 'user@host']), { destination: 'user@host', remotePort: 27833, sshPort: undefined });
+  assert.throws(() => parseRemoteCommand(['remote', 'enable', '--ssh', '-oProxyCommand=x']), /requires/);
+  assert.throws(() => parseRemoteCommand(['remote', 'enable', '--ssh', 'host', '--remote-port', '0']), /65535/);
+  assert.throws(() => parseRemoteCommand(['remote', 'start', '--ssh', 'host']), /Usage/);
+  assert.deepEqual(parseRemoteCommand(['remote', 'enable', '--ssh', 'user@host']), { command: 'enable', options: { destination: 'user@host', remotePort: 27833, sshPort: undefined } });
+  assert.deepEqual(parseRemoteCommand(['remote', 'disable']), { command: 'disable' });
 });
 
 test('credentials are distinct, private and stable', async t => {
@@ -223,6 +226,7 @@ setInterval(() => {}, 1000);
   const calls = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
   const master = calls.find(args => args.includes('-M'));
   assert.ok(master.includes('ClearAllForwardings=yes'));
+  assert.ok(master.includes('BatchMode=yes'), 'the daemon has no terminal, so ssh must never prompt');
   const forward = calls.find(args => args.includes('forward'));
   assert.ok(forward.includes('127.0.0.1:27833:127.0.0.1:17833'));
   await assert.rejects(stat(master[master.indexOf('-S') + 1]), { code: 'ENOENT' });
@@ -237,4 +241,76 @@ setInterval(() => {}, 1000);
     aborted.abort();
     assert.equal(await interrupted.wait(), 0);
   } finally { await interrupted.stop(aborted.signal); }
+});
+
+function fakeTunnelFactory() {
+  const created = [];
+  const factory = (options, localPort) => {
+    let drop;
+    const closed = new Promise(resolve => { drop = resolve; });
+    const tunnel = { options, localPort, stopped: false, errorOutput: '',
+      async start(signal) {
+        if (factory.failNext) { factory.failNext = false; throw new Error('Permission denied (publickey)'); }
+        signal.throwIfAborted();
+        signal.addEventListener('abort', () => drop(0), { once: true }); // like ssh exiting on SIGTERM
+      },
+      wait: () => closed, drop: code => drop(code),
+      async stop() { tunnel.stopped = true; drop(0); } };
+    created.push(tunnel);
+    return tunnel;
+  };
+  factory.created = created;
+  return factory;
+}
+
+async function waitFor(check, label) {
+  for (let i = 0; i < 200; i++) { if (check()) return; await new Promise(r => setTimeout(r, 10)); }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+test('tunnel supervisor follows the remote.json switch and reconnects after drops', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'braiser-tunnel-test-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const factory = fakeTunnelFactory();
+  const supervisor = new TunnelSupervisor(dir, 17833, { createTunnel: factory, retryDelaysMs: [20] });
+  t.after(() => supervisor.stop());
+
+  assert.deepEqual(await supervisor.reload(), { enabled: false, state: 'disabled' });
+  assert.deepEqual(await readRemoteSettings(dir), { enabled: false });
+
+  await writeRemoteSettings(dir, { enabled: true, destination: 'user@host', remotePort: 27833 });
+  assert.equal((await stat(path.join(dir, 'remote.json'))).mode & 0o777, 0o600);
+  factory.failNext = true;
+  await supervisor.reload();
+  await waitFor(() => supervisor.status().state === 'connected', 'first connection after a failed attempt');
+  assert.equal(factory.created.length, 2);
+  assert.deepEqual(factory.created[1].options, { destination: 'user@host', remotePort: 27833, sshPort: undefined });
+  assert.equal(factory.created[1].localPort, 17833);
+
+  await supervisor.reload();
+  assert.equal(factory.created.length, 2, 'reloading unchanged settings keeps the running tunnel');
+
+  factory.created[1].drop(255);
+  await waitFor(() => factory.created.length === 3 && supervisor.status().state === 'connected', 'reconnection');
+
+  await writeRemoteSettings(dir, { enabled: false, destination: 'user@host', remotePort: 27833 });
+  assert.deepEqual(await supervisor.reload(), { enabled: false, state: 'disabled' });
+  assert.ok(factory.created.every(tunnel => tunnel.stopped));
+});
+
+test('only the local credential can see or switch the tunnel', async t => {
+  let reloads = 0;
+  const tunnel = { status: () => ({ enabled: false, state: 'disabled' }), reload: async () => { reloads++; return { enabled: false, state: 'disabled' }; } };
+  const daemon = new BraiserDaemon({ extensionPort: 0, clientPort: 0, localToken, remoteToken, tunnel });
+  await daemon.ready;
+  t.after(() => daemon.close());
+  const url = `ws://127.0.0.1:${daemon.ports.client}`;
+  const local = new ExtensionBridge(url, localToken), remote = new ExtensionBridge(url, remoteToken);
+  t.after(() => { local.close(); remote.close(); });
+  assert.deepEqual((await local.status()).tunnel, { enabled: false, state: 'disabled' });
+  assert.equal((await remote.status()).tunnel, undefined);
+  await assert.rejects(remote.reloadTunnel(), /browser host/);
+  assert.equal(reloads, 0);
+  assert.deepEqual(await local.reloadTunnel(), { enabled: false, state: 'disabled' });
+  assert.equal(reloads, 1);
 });

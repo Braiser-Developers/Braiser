@@ -1,6 +1,6 @@
 # D-0004 用前台入口管理一条独立 SSH 隧道
 
-- 状态：有效
+- 状态：已取代（→ [D-0018](0018-remote-tunnel-switch.md)）
 - 日期：2026-11-12
 - 决策者：agent
 - 服务于：[作者预期](../overview.md)、[D-0002](0002-remote-access.md)

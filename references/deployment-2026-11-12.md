@@ -39,3 +39,11 @@
 - 远程模式的 MCP 列出 10 个工具，observe 的说明已是新版（包含网址简写说明）。当时 SSH 隧道未开，`braiser.status` 报告 `ECONNREFUSED 127.0.0.1:27833`。
 - 远程 OpenCode 也注册了 `braiser`（`~/.config/opencode/opencode.jsonc`，local STDIO，`BRAISER_MODE=remote`、27833 地址和 token 文件），与 Codex 指向同一个 `mcp/dist/server.js`。
 - 同步时远程有 4 个正在运行的 Braiser MCP 进程（3 个属于 OpenCode 服务，1 个属于 Codex 应用服务），都在构建前启动，仍是旧代码；没有结束它们。
+
+## 2026-11-14 远程访问开关（D-0018）的真实服务器验证
+
+- 为了不开放作者的浏览器，用独立的测试 daemon 验证：临时 state 目录、客户端端口 18901、扩展端口 18902，服务器端口 27899，没有连接 Chrome 扩展。作者真实的 `~/.braiser` 和 daemon 没有参与。
+- `remote enable --ssh user@server --remote-port 27899`：免交互登录检查通过，约 1 秒后报告隧道已连接。服务器上 `ss -ltn` 显示只在 `127.0.0.1:27899` 监听；不带凭据的 WebSocket 握手得到 401，说明转发到了 Braiser daemon。
+- 手动结束本机 SSH master 进程后，状态先变为 retrying（上次错误 `SSH connection closed (code 0)`），约 2 秒后自动重连成功，换了新的 master 进程。
+- `remote disable` 后 master 进程退出，服务器上 27899 不再监听。测试 daemon 和临时目录随后删除。
+- 之后重启了作者本机的真实 daemon（换成支持开关的新代码），并执行 `remote disable`：`~/.braiser/remote.json` 为 `{"enabled": false}`，`braiser.status` 显示 `tunnel.state=disabled`，Chrome 扩展重新连上。

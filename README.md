@@ -6,13 +6,15 @@ Braiser 是让 Agent 操作浏览器的轻量级 MCP 工具。支持本机 Agent
 
 ## 远程访问
 
-在浏览器主机完成构建后：
+远程访问是一个开关，平时关着。在浏览器主机完成构建后：
 
 ```bash
-npm run remote -- start --ssh user@server
+npm run remote -- enable --ssh user@server   # 打开，daemon 维持隧道并自动重连
+npm run remote -- status
+npm run remote -- disable                               # 关闭
 ```
 
-入口准备 daemon 并建立前台 SSH 隧道；退出只关闭此次隧道。本机生成独立的 local-token 和 remote-token，远程 MCP 只使用 remote-token。升级旧版本需要构建并重启 daemon/MCP；启动器不会自动停止旧服务。远程 MCP 的配置、凭据准备、首版工具范围和故障定位见 [远程访问指南](docs/remote-access.md)。
+只支持密钥登录（daemon 在后台运行，不能回答 SSH 的提问）。本机生成独立的 local-token 和 remote-token，远程 MCP 只使用 remote-token。升级旧版本需要构建并重启 daemon/MCP。远程 MCP 的配置、凭据准备、首版工具范围和故障定位见 [远程访问指南](docs/remote-access.md)。
 
 ```text
 本地 Agent / Codex

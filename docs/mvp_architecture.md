@@ -1,6 +1,6 @@
 # 当前 MVP 架构
 
-设计依据：[D-0001](../user-spec/decisions/0001-existing-browser-architecture.md)、[D-0002](../user-spec/decisions/0002-remote-access.md)。作者需求见 [overview](../user-spec/overview.md)。
+设计依据：[D-0001](../user-spec/decisions/0001-existing-browser-architecture.md)、[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0018](../user-spec/decisions/0018-remote-tunnel-switch.md)。作者需求见 [overview](../user-spec/overview.md)。
 
 ## 本机链路
 
@@ -14,7 +14,7 @@ MCP 自动读取 local-token。本机 daemon 不存在时按需启动；认证�
 
 Linux Agent → Linux MCP stdio → Linux 回环 27833 → 本机发起的 SSH 反向隧道 → 本机 daemon 17833 → 原扩展链路。
 
-前台入口准备 daemon 和独立隧道，SSH 转发得到确认后报告就绪；关闭入口只停止这条隧道。远程 MCP 用 remote-token，从不在 Linux 启动 daemon。配置与操作步骤见 [远程访问](remote-access.md)。
+远程访问是开关：`npm run remote -- enable` 打开后，daemon 维持一条独立 SSH 隧道并在断线后自动重连，`disable` 关闭，见 [D-0018](../user-spec/decisions/0018-remote-tunnel-switch.md)。远程 MCP 用 remote-token，从不在 Linux 启动 daemon。配置与操作步骤见 [远程访问](remote-access.md)。
 
 ## 能力边界
 

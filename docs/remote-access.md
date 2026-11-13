@@ -1,6 +1,6 @@
 # 远程 Agent 操作本机浏览器
 
-设计依据：[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0003](../user-spec/decisions/0003-credentials-and-tools.md)、[D-0004](../user-spec/decisions/0004-foreground-ssh-launcher.md)。
+设计依据：[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0003](../user-spec/decisions/0003-credentials-and-tools.md)、[D-0018](../user-spec/decisions/0018-remote-tunnel-switch.md)。
 
 ## 运行位置
 
@@ -11,34 +11,30 @@ Linux Agent → stdio MCP → Linux 127.0.0.1:27833
 浏览器主机 daemon 127.0.0.1:17833 → 扩展连接 17832 → Chrome 页面
 ```
 
-服务器不需要主动连接浏览器主机，浏览器主机不需要运行 SSH 服务。启动器目前支持 macOS/Linux OpenSSH；Linux 上的 MCP 只需要 Node 和项目依赖，读取 Markdown 还使用项目的 Python 环境。
+服务器不需要主动连接浏览器主机，浏览器主机不需要运行 SSH 服务。隧道由浏览器主机上的 daemon 维持，目前支持 macOS/Linux OpenSSH；Linux 上的 MCP 只需要 Node 和项目依赖，读取 Markdown 还使用项目的 Python 环境。
 
-## 从旧版本升级
+## 打开和关闭远程访问
 
-此次加入认证协议 v2，旧 daemon 不接受新认证约定。实际启用时，在浏览器主机构建新版并停止旧 daemon，再启动新版；Linux 使用同版 MCP。启动器遇到不兼容服务或认证错误会报错，不会杀掉已有进程或覆盖其端口。
-
-扩展代码没有变化，已加载的扩展可继续使用。旧 MCP 客户端必须随 daemon 一起升级。仅修改源文件不会改变当前运行服务。
-
-## 本机启动
-
-在浏览器主机项目目录准备依赖并构建（首次安装使用现有 npm install 流程）：
+远程访问是一个开关，平时关着。在浏览器主机的项目目录运行：
 
 ```bash
 npm run build
-npm run remote -- start --ssh user@server
+npm run remote -- enable --ssh user@server   # 打开
+npm run remote -- status                                # 查看设置和隧道状态
+npm run remote -- disable                               # 关闭
 ```
 
-也可以直接运行：
+也可以写成 `node mcp/dist/remote.js remote enable --ssh ...`；安装了 mcp 包的 bin 入口时是 `braiser remote enable --ssh ...`。`enable` 支持 `--remote-port 27833`、`--ssh-port 22`；SSH 目标可用 user@host、IPv4 或 SSH config alias。
 
-```bash
-node mcp/dist/remote.js remote start --ssh user@server
-```
+- `enable` 先用 `BatchMode=yes` 检查能否免交互登录。daemon 在后台运行，不能回答主机密钥确认或密码提示，所以只支持密钥登录；第一次连新服务器时，先在终端手动 `ssh` 一次。
+- 检查通过后，设置写入 `~/.braiser/remote.json`（权限 0600），命令确保 daemon 在运行，请它按新设置建立隧道，等待最多 30 秒并报告结果。
+- 开关打开期间，daemon 维持一条专用 SSH 连接，把服务器 `127.0.0.1:27833` 转发到本机 `127.0.0.1:17833`。断线后按 2、5、10、30、60 秒的间隔自动重连；重连只恢复转发，不重发浏览器动作。
+- 开关状态记在文件里，daemon 重启后照旧。daemon 在本机 Codex/OpenCode 会话或 `remote enable` 需要时启动；重启电脑后，在这之前隧道不会恢复。
+- `disable` 写入关闭状态并让 daemon 立即断开隧道；daemon 没在运行时只改设置。
+- 本机 `braiser.status` 会附带 `tunnel` 字段（state 为 disabled、connecting、connected 或 retrying，以及目标、端口和上次错误）。远程凭据看不到这个字段，也不能开关隧道。
+- 扩展未连接时，从 Chrome 扩展 popup 打开 Bridge 页面。
 
-若安装了 mcp 包的 bin 入口，等价命令是 `braiser remote start --ssh ...`。支持 `--remote-port 27833`、`--ssh-port 22` 和 `--help`；SSH 目标可用 user@host、IPv4 或 SSH config alias。
-
-入口会准备或复用 daemon，检查远程凭据，再建立一条独立 SSH 连接。正常 SSH 密钥、密码提示和主机密钥校验仍生效。保持终端打开，看到转发确认及 Chrome 扩展已连接才表示两段连接都就绪。扩展未连接时，从 Chrome 扩展 popup 打开 Bridge 页面，并准备 Braised 标签组。
-
-按 Ctrl-C 关闭此次隧道；daemon 保持运行。本机休眠或网络断开后，命令会在检测到断线时退出，重新运行即可。不会自动重发浏览器动作。
+升级到这个版本后，需要重启一次旧 daemon，新的 daemon 才会管理隧道；`enable` 遇到不支持隧道的旧 daemon 会提示重启。
 
 ## 远程凭据与 MCP 配置
 
@@ -47,7 +43,7 @@ node mcp/dist/remote.js remote start --ssh user@server
 - `~/.braiser/local-token`：本机完整工具能力。
 - `~/.braiser/remote-token`：远程浏览、操作和读取能力。
 
-只把 `remote-token` 通过可信方式复制到 Linux，例如保存在 Linux 的 `/home/<user>/.braiser/remote-token`，目录权限 0700、文件权限 0600。启动命令只显示凭据文件位置，不打印内容；不会自动上传凭据或修改服务器。
+只把 `remote-token` 通过可信方式复制到 Linux，例如保存在 Linux 的 `/home/<user>/.braiser/remote-token`，目录权限 0700、文件权限 0600。`enable` 只显示凭据文件位置，不打印内容；不会自动上传凭据或修改服务器。
 
 Linux 上准备同版项目及其依赖。项目现有安装流程会创建 Python Markdown 环境，见 [Markdown 协议](markdown_pipeline.md)。在远程 Agent 的 MCP 配置中指定以下环境变量；路径应按实际 checkout 调整：
 
@@ -62,7 +58,7 @@ BRAISER_DAEMON_URL = "ws://127.0.0.1:27833"
 BRAISER_TOKEN_FILE = "/home/<user>/.braiser/remote-token"
 ```
 
-这只是 MCP 配置示例，不由启动器自动写入。远程模式未配置凭据时直接报错；隧道尚未建立时仍可列出工具，`braiser.status` 会报告连接错误。后续调用可重新连接，不启动 Linux daemon。
+这只是 MCP 配置示例，不会自动写入。远程模式未配置凭据时直接报错；隧道尚未建立时仍可列出工具，`braiser.status` 会报告连接错误。后续调用可重新连接，不启动 Linux daemon。
 
 本机默认模式仍是 local，MCP 会自动读取本机 local-token，在端口没有监听时启动 daemon。daemon 已运行但认证不通过时，检查凭据与版本，不会悄悄启动另一个服务。
 
@@ -93,12 +89,13 @@ SSH 默认只申请服务器回环地址，服务端应保持 `GatewayPorts no` 
 |---|---|
 | 本机连接 HTTP 401 | 凭据不匹配，或需要升级/重启旧 daemon |
 | 不兼容 daemon | 连接到旧协议或错误进程，构建并重启对应服务 |
-| SSH 登录失败/超时 | 检查正常 SSH 登录；命令等待登录最多 120 秒 |
-| remote forwarding failed | 远程端口被占用、转发被禁或确认超时；不会显示已就绪 |
+| Cannot log in ... without prompts | 不能免交互登录：先在终端 `ssh` 一次，确认主机密钥并配置密钥登录 |
+| tunnel state=retrying | 隧道断开或连不上，daemon 会自动重连；`npm run remote -- status` 显示上次错误 |
+| remote forwarding failed | 远程端口被占用、转发被禁或确认超时；daemon 会继续重试 |
 | daemonConnected=false | 隧道/本机 daemon 不可用，或凭据不对；查看 status 的 error |
 | extensionConnected=false | 打开本机扩展 Bridge 页面并检查扩展端口；扩展端口只接受 `chrome-extension://` 来源，其他来源得到 403（见 [D-0011](../user-spec/decisions/0011-extension-port-origin.md)） |
 | operation outcome is unknown | 动作可能已执行；重新 observe 后再决定，不直接重试提交 |
 
 ## 验证边界
 
-`npm test` 构建扩展与 MCP，使用随机回环端口的临时 daemon、模拟扩展（带扩展来源）、真实 MCP stdio，以及假的 SSH 可执行程序验证启动确认、失败和清理。不连接真实服务器或浏览器，不验证真实 sshd 策略与登录；实际启用时仍需端到端验收。测试不读写生产凭据。
+`npm test` 构建扩展与 MCP，使用随机回环端口的临时 daemon、模拟扩展（带扩展来源）、真实 MCP stdio、假的 SSH 可执行程序（验证转发确认、失败和清理，以及 master 带 `BatchMode=yes`），并用假隧道验证开关、断线重连和凭据权限。不连接真实服务器或浏览器，不读写生产凭据。2026-11-14 另外用独立的测试 daemon 对真实服务器做过一次开关和断线重连验证，见 [远程部署实测](../references/deployment-2026-11-12.md)。

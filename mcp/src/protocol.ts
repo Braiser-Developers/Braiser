@@ -33,7 +33,7 @@ export interface ExtensionResponse<T = unknown> {
 export type DaemonRequest =
   | {
       id: string;
-      type: "daemon.status";
+      type: "daemon.status" | "daemon.tunnel_reload";
     }
   | {
       id: string;
@@ -44,7 +44,7 @@ export type DaemonRequest =
 
 export type DaemonRequestInput =
   | {
-      type: "daemon.status";
+      type: "daemon.status" | "daemon.tunnel_reload";
     }
   | {
       type: "extension.request";
@@ -64,6 +64,8 @@ export interface DaemonStatus {
   protocolVersion: 2;
   clientMode: "local" | "remote";
   extensionConnected: boolean;
+  /** Only reported to local clients (D-0018). */
+  tunnel?: import("./tunnel-supervisor.js").TunnelStatus;
 }
 
 export interface ActiveTabInfo {

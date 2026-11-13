@@ -24,10 +24,11 @@
 | [policy.ts](../mcp/src/policy.ts) | MCP 和 daemon 共用远程工具允许集合 |
 | [lifecycle.ts](../mcp/src/lifecycle.ts) | 本机 daemon 就绪检查与按需启动；远程不启动 daemon |
 | [websocket.ts](../mcp/src/websocket.ts) | 认证 WebSocket client、请求关联、超时、断线处理 |
-| [daemon.ts](../mcp/src/daemon.ts) | daemon 进程入口，准备凭据、监听并处理退出 |
+| [daemon.ts](../mcp/src/daemon.ts) | daemon 进程入口，准备凭据、监听、启动隧道守护并处理退出 |
 | [daemon-server.ts](../mcp/src/daemon-server.ts) | 两个回环监听端口、客户端认证和身份、扩展来源校验、扩展请求路由 |
-| [remote.ts](../mcp/src/remote.ts) | 前台远程访问入口，编排 daemon、隧道与状态显示 |
-| [ssh-tunnel.ts](../mcp/src/ssh-tunnel.ts) | 参数校验、独立 OpenSSH master、转发确认和子进程清理 |
+| [remote.ts](../mcp/src/remote.ts) | `remote enable/disable/status` 命令：检查免交互登录、写开关设置、通知 daemon |
+| [tunnel-supervisor.ts](../mcp/src/tunnel-supervisor.ts) | 读写 `remote.json` 开关，按设置维持隧道并断线重连（D-0018） |
+| [ssh-tunnel.ts](../mcp/src/ssh-tunnel.ts) | 命令解析与参数校验、免交互登录检查、独立 OpenSSH master、转发确认和子进程清理 |
 | [cli.ts](../mcp/src/cli.ts) | 原调试/下载 CLI，复用连接配置和生命周期；远程禁止文件导出 |
 | [protocol.ts](../mcp/src/protocol.ts) | MCP/daemon 与扩展消息类型；认证状态协议 v2、请求超时 |
 | [markdown.ts](../mcp/src/markdown.ts) | MCP 所在主机的 DOM → Markdown 共享管线及临时文件清理 |

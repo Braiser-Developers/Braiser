@@ -46,10 +46,11 @@ const fileName = `${dateStamp()}-${slugify(pageName)}.md`;
 
 ## 远程改造后的职责补充
 
-依据：[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0003](../user-spec/decisions/0003-credentials-and-tools.md)、[D-0004](../user-spec/decisions/0004-foreground-ssh-launcher.md)。
+依据：[D-0002](../user-spec/decisions/0002-remote-access.md)、[D-0003](../user-spec/decisions/0003-credentials-and-tools.md)、[D-0018](../user-spec/decisions/0018-remote-tunnel-switch.md)。
 
 - daemon.ts 保留进程入口，监听、认证、路由移到 daemon-server.ts。
 - config.ts、auth.ts、policy.ts 分别管理配置、凭据和能力集合。
 - lifecycle.ts 统一 MCP 和 CLI 的本机自动启动，远程模式禁止启动 daemon。
-- remote.ts 只编排前台远程访问，SSH 子进程与转发确认由 ssh-tunnel.ts 管理。
+- remote.ts 只处理 enable/disable/status 命令；开关设置的读写和重连循环在 tunnel-supervisor.ts，SSH 子进程与转发确认在 ssh-tunnel.ts。
+- 隧道开关只对 local-token 开放；不要给 remote-token 开任何能改变远程访问范围的入口。
 - 远程工具限制同时作用于列表、调用和 daemon，不能只隐藏工具名。
