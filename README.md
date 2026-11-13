@@ -159,10 +159,10 @@ npm run switch-tab -- <tabId>
 - `braiser.status`：检查 MCP、daemon 和扩展连接状态。
 - `browser.get_active_tab`：获取 `Braised` tab group 中当前 agent focus tab 的标题、URL 和 tab id。名称保留 `active_tab` 是为了兼容早期调用方。
 - `browser.list_tabs`：列出 `Braised` tab group 中的页面，并标出当前 agent focus tab。
-- `browser.create_tab`：在 `Braised` tab group 中创建新 tab，并将其设为 agent focus tab。
+- `browser.create_tab`：在 `Braised` tab group 中创建新 tab，并将其设为 agent focus tab。默认在后台打开，不切换你眼前的页面；只有页面在后台不正常或需要你亲手操作时，Agent 才传 `active: true`。
 - `browser.open_tab`：在指定 tab 或当前 agent focus tab 中打开 URL。
 - `browser.close_tab`：关闭指定 tab 或当前 agent focus tab，并重新选择焦点。
-- `browser.switch_tab`：把 agent focus 切换到 `Braised` tab group 中的指定 tab。
+- `browser.switch_tab`：把 agent focus 切换到 `Braised` tab group 中的指定 tab，默认不切换 Chrome 前台（`activate: true` 才切换）。
 - `browser.download`：通过 Chrome 原生下载管理器下载 URL 到默认下载目录；相对 URL 会基于当前 agent focus tab 解析，可选传入默认目录下的文件名。
 - `browser.observe`：返回目标页面的缩进大纲（角色、名称、全部文字、表单当前值和状态），可操作元素带编号，iframe 内编号带 `F1` 前缀。格式见 [页面观察与操作](docs/observe_act.md)。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。

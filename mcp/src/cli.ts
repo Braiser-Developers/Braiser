@@ -91,7 +91,8 @@ async function runCommand(command: CliCommand, bridge: ExtensionBridge): Promise
 
   const tab = await bridge.request<BrowserTabInfo>(
     "browser.switch_tab",
-    { tabId: command.tabId },
+    // A person running the CLI wants to see the tab; agents default to the background (D-0020).
+    { tabId: command.tabId, activate: true },
     10000
   );
   console.log(JSON.stringify(tab, null, 2));

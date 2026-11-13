@@ -176,4 +176,11 @@ test('creating the Braised group keeps a background tab in the background (D-001
   const list = await bridge.request('browser.list_tabs');
   assert.equal(list.tabs.length, 1);
   assert.equal(list.focusedTabId, created.tabId);
+
+  // D-0020: without the parameter, tabs also stay in the background; only the agent focus moves.
+  const second = await bridge.request('browser.create_tab', { url: `${origin}/docs` });
+  assert.equal(second.active, false);
+  const switched = await bridge.request('browser.switch_tab', { tabId: created.tabId });
+  assert.equal(switched.active, false);
+  assert.equal((await bridge.request('browser.list_tabs')).focusedTabId, created.tabId);
 });

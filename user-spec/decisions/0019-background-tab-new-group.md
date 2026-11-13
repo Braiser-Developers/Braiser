@@ -9,7 +9,7 @@
 
 ## 背景
 
-`browser.create_tab` 和 `browser.open_tab` 的 `active` 参数、`browser.switch_tab` 的 `activate` 参数，决定 Chrome 是否把这个标签页切到前台，默认是 true。传 false 时，Braiser 的工作焦点仍会换到这个标签页，但作者眼前看到的页面不变，Agent 在后台操作。
+`browser.create_tab` 和 `browser.open_tab` 的 `active` 参数、`browser.switch_tab` 的 `activate` 参数，决定 Chrome 是否把这个标签页切到前台，当时默认是 true（[D-0020](0020-background-tabs-by-default.md) 起改为 false）。传 false 时，Braiser 的工作焦点仍会换到这个标签页，但作者眼前看到的页面不变，Agent 在后台操作。
 
 ## 决策
 

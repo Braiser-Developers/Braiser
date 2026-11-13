@@ -70,7 +70,7 @@ export const tools: Tool[] = [
         },
         active: {
           type: "boolean",
-          description: "Whether to also make Chrome visually activate the tab. Defaults to true."
+          description: "Whether to also show the tab in Chrome. Defaults to false: the tab opens in the background and the author's view does not change. Only pass true when the page does not work in a background tab (content that loads only when visible, stalled timers) or the author must act on it (login, 2FA, captcha); true also brings the Chrome window to the front."
         }
       },
       additionalProperties: false
@@ -92,7 +92,7 @@ export const tools: Tool[] = [
         },
         active: {
           type: "boolean",
-          description: "Whether to also make Chrome visually activate the tab."
+          description: "Whether to also show the tab in Chrome. Defaults to false: whether the tab is in front does not change. Only pass true when the page does not work in a background tab (content that loads only when visible, stalled timers) or the author must act on it (login, 2FA, captcha); true also brings the Chrome window to the front."
         }
       },
       required: ["url"],
@@ -125,7 +125,7 @@ export const tools: Tool[] = [
         },
         activate: {
           type: "boolean",
-          description: "Whether to also make Chrome visually activate the tab. Defaults to true."
+          description: "Whether to also show the tab in Chrome. Defaults to false: only the agent focus moves. Only pass true when the page does not work in a background tab (content that loads only when visible, stalled timers) or the author must act on it (login, 2FA, captcha); true also brings the Chrome window to the front."
         }
       },
       required: ["tabId"],

@@ -161,7 +161,8 @@ async function listTabs(): Promise<BrowserTabList> {
 }
 
 async function createTab(input: BrowserCreateTabInput = {}): Promise<BrowserTabInfo> {
-  const group = await getOrCreateBraisedGroup(input.url, input.active ?? true);
+  // D-0020: tabs open in the background unless the caller explicitly asks for the front.
+  const group = await getOrCreateBraisedGroup(input.url, input.active === true);
   const url = normalizeOptionalUrl(input.url);
   let tab: ActiveChromeTab;
 
@@ -174,13 +175,13 @@ async function createTab(input: BrowserCreateTabInput = {}): Promise<BrowserTabI
     tab = assertTabId(await chrome.tabs.create({
       windowId: group.group.windowId,
       url,
-      active: input.active ?? true
+      active: input.active === true
     }));
     await chrome.tabs.group({ groupId: group.group.id, tabIds: [tab.id] });
   }
 
   await setFocusedTabId(tab.id);
-  if (input.active !== false) {
+  if (input.active === true) {
     await activateTab(tab.id, tab.windowId);
   }
 
@@ -239,7 +240,7 @@ async function switchTab(input: BrowserSwitchTabInput): Promise<BrowserTabInfo> 
 
   const tab = await getBraisedTabById(input.tabId);
   await setFocusedTabId(tab.id);
-  if (input.activate !== false) {
+  if (input.activate === true) {
     await activateTab(tab.id, tab.windowId);
   }
 
@@ -324,7 +325,7 @@ async function activateTab(tabId: number, windowId: number): Promise<void> {
 
 async function getOrCreateBraisedGroup(
   initialUrl?: string,
-  active = true
+  active = false
 ): Promise<{ group: chrome.tabGroups.TabGroup; createdTab?: ActiveChromeTab }> {
   const groups = await chrome.tabGroups.query({});
   const group = groups
