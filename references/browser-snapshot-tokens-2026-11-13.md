@@ -19,6 +19,17 @@
 
 参照：按 Claude 的图片计算方法，一张 1280×800 截图约 1334 token（见 [Claude 的浏览器操作](Claude-browser-tools.md)）。
 
+## 只保留标题和可交互元素时
+
+同一天用 Playwright MCP 再取一次快照，只保留标题行和可交互元素行（link、button、textbox 等，不含 URL 行和结构层级），用同一分词器计数：
+
+| 页面 | 完整快照 | 标题 + 可交互元素 | 标题数 | 可交互元素数 |
+|---|---|---|---|---|
+| 英文维基 | 37791 token | 8350 token | 18 | 488 |
+| GitHub 仓库页 | 22696 token | 3966 token | 32 | 178 |
+
+英文维基的可交互元素大多是正文段落里的行内链接。headless Chrome 打开 GitHub 注册页时得到 403 和人机验证页面，未计入。
+
 ## 其他观察
 
 - GitHub 仓库页上，Braiser 的 `browser.observe` 连续几次都超过 30 秒超时。之后在同一页面和新开的标签页上，`page.extract_readable_text` 也超时；关闭标签页后扩展恢复正常。原因未查明。推断可能与 observe 对每个可点击元素逐个发 CDP 命令，以及先前未完成的 observe 仍在运行有关。

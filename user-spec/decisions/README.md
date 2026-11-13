@@ -79,3 +79,4 @@
 | [D-0009](0009-existing-markdown-pipeline.md) | 保留既有 Markdown 转换依赖与执行位置 | 有效 |
 | [D-0010](0010-user-spec-recording-standard.md) | 同步新版记录规则并按主题整理需求总览 | 有效 |
 | [D-0011](0011-extension-port-origin.md) | 扩展端口只接受 Chrome 扩展来源的连接 | 有效 |
+| [D-0012](0012-internal-cdp.md) | Braiser 内部可以使用 CDP，Agent 只用固定动作 | 有效 |
