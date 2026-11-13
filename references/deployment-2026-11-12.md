@@ -2,15 +2,15 @@
 
 最近核对：2026-11-14（远程代码同步见文末）。
 
-来源：本次在作者本机与 `user@server` 之间的实测。没有记录 token 内容。
+来源：本次在作者本机与远程 Linux 服务器之间的实测。没有记录 token 内容；服务器的登录名、地址和各处具体路径按作者要求不写进仓库。
 
 ## 环境
 
-- 浏览器主机项目：`/path/to/Braiser`。
-- 远程项目：`/path/to/Braiser`，最初由提交 `86a1704` 的源码归档复制得到，2026-11-14 同步到 `3df08f0`；不是远程 Git 工作区。
-- 远程 Node：`v24.18.0`，路径 `/home/<user>/.nvm/versions/node/v24.18.0/bin/node`。
+- 浏览器主机项目：作者本机的 Braiser 检出目录。
+- 远程项目：服务器上的 Braiser 目录，最初由提交 `86a1704` 的源码归档复制得到，2026-11-14 同步到 `3df08f0`；不是远程 Git 工作区。
+- 远程 Node：`v24.18.0`，通过 nvm 安装。
 - 远程 Python：`3.10.12`；项目虚拟环境使用 `uv` 创建，依赖 `markitdown==0.1.5`、`beautifulsoup4==4.14.3` 及解析出的依赖已安装。
-- 远程凭据：`/home/<user>/.braiser/remote-token`，文件权限 0600；只部署了 remote-token。
+- 远程凭据：服务器上的 `~/.braiser/remote-token`，文件权限 0600；只部署了 remote-token。
 - 远程 Codex 已注册名为 `braiser` 的 STDIO MCP，启动命令为远程 Node 和项目 `mcp/dist/server.js`；配置了 `BRAISER_MODE=remote`、回环 27833 地址和 token 文件路径。原 `~/.codex/config.toml` 在修改前保存为 `~/.codex/config.toml.before-braiser-20261112`。
 - 本机 daemon 使用新版协议 v2，监听本机回环 17832/17833；Chrome Bridge 已连接。
 - 当前前台 SSH 入口保持在线：服务器 `127.0.0.1:27833` → 本机 `127.0.0.1:17833`。服务器端口实测只监听回环地址。
@@ -33,7 +33,7 @@
 
 ## 2026-11-14 同步到 3df08f0
 
-- 同步前用 checksum 比对，远程源码与 `86a1704` 完全一致，没有本地改动。同步前的源码备份在 `/home/<user>/Tools/braiser-backup-86a1704-20261114.tgz`（不含 node_modules 和 Python 环境）。
+- 同步前用 checksum 比对，远程源码与 `86a1704` 完全一致，没有本地改动。同步前的源码备份在服务器上 Braiser 目录旁的 `braiser-backup-86a1704-20261114.tgz`（不含 node_modules 和 Python 环境）。
 - 用 `git archive 3df08f0` 的内容经 rsync 覆盖源码，排除 node_modules、`.venv-markdown`、两个 dist 目录和 downloads；新增 40 个文件、更新 25 个，没有删除。
 - 远程执行 `npm install` 和 `npm test`：19 项测试全部通过。npm 提示 esbuild 的安装脚本被拦截，构建仍然成功。
 - 远程模式的 MCP 列出 10 个工具，observe 的说明已是新版（包含网址简写说明）。当时 SSH 隧道未开，`braiser.status` 报告 `ECONNREFUSED 127.0.0.1:27833`。

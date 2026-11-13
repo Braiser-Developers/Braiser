@@ -8,7 +8,7 @@
 
 - 本机 `braiser.status` 返回 `daemonConnected=true`、`protocolVersion=2`、`clientMode=local`、`extensionConnected=true`。
 - 本机 `browser.list_tabs` 和 `browser.get_active_tab` 均能读取 Chrome 中 Braised 标签组的当前焦点页面。
-- 当前本机 MCP 入口是 `/opt/homebrew/bin/node /path/to/Braiser/mcp/dist/server.js`。
+- 当前本机 MCP 入口是用 Homebrew 安装的 node 运行项目中的 `mcp/dist/server.js`。
 
 ## Codex
 
