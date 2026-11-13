@@ -8,6 +8,8 @@ Agent → MCP stdio → 认证 WebSocket 127.0.0.1:17833 → daemon → 扩展 B
 
 MCP 自动读取 local-token。本机 daemon 不存在时按需启动；认证错误、协议不兼容或其他连接错误直接报告，不替换既有服务。扩展 Bridge 仍需保持打开。
 
+扩展端口 17832 只接受 Origin 为 `chrome-extension://<扩展 ID>` 的连接，网页和其他来源返回 403，不会顶替已连接的 Bridge，见 [D-0011](../user-spec/decisions/0011-extension-port-origin.md)。
+
 ## 远程链路
 
 Linux Agent → Linux MCP stdio → Linux 回环 27833 → 本机发起的 SSH 反向隧道 → 本机 daemon 17833 → 原扩展链路。

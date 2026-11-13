@@ -10,6 +10,7 @@ const requestTypes = new Set([
   "browser.close_tab", "browser.switch_tab", "browser.download", "browser.upload", "browser.observe",
   "browser.act", "page.extract_readable_text", "debug.inject_js", "debug.cdp_command"
 ]);
+const extensionOrigin = /^chrome-extension:\/\/[a-p]{32}$/;
 interface Pending {
   client: WebSocket;
   clientId: string;
@@ -33,7 +34,14 @@ export class BraiserDaemon {
     if (!options.localToken || !options.remoteToken || options.localToken === options.remoteToken) {
       throw new Error("Daemon requires distinct local and remote tokens");
     }
-    this.extensionServer = new WebSocketServer({ host: "127.0.0.1", port: options.extensionPort });
+    this.extensionServer = new WebSocketServer({
+      host: "127.0.0.1", port: options.extensionPort,
+      // D-0011: web pages can open loopback WebSockets but cannot forge a chrome-extension:// Origin.
+      verifyClient: (info, done) => {
+        const authorized = extensionOrigin.test(info.origin ?? "");
+        done(authorized, authorized ? undefined : 403, authorized ? undefined : "Forbidden");
+      }
+    });
     this.clientServer = new WebSocketServer({
       host: "127.0.0.1", port: options.clientPort,
       verifyClient: (info, done) => {

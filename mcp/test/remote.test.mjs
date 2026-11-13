@@ -16,6 +16,7 @@ import { toolsForMode, callTool } from '../dist/tools.js';
 import { parseRemoteArgs, SshTunnel } from '../dist/ssh-tunnel.js';
 
 const localToken = 'L'.repeat(43), remoteToken = 'R'.repeat(43);
+const extensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
 async function fixture(t) {
   const daemon = new BraiserDaemon({ extensionPort: 0, clientPort: 0, localToken, remoteToken });
   await daemon.ready;
@@ -25,7 +26,7 @@ async function fixture(t) {
   const remote = new ExtensionBridge(url, remoteToken);
   t.after(() => { local.close(); remote.close(); });
   const connectExtension = async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${daemon.ports.extension}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${daemon.ports.extension}`, { origin: extensionOrigin });
     await once(ws, 'open');
     t.after(() => ws.terminate());
     return ws;
@@ -110,6 +111,20 @@ test('timeout does not replay actions; request ids route concurrent clients corr
   assert.equal(actions, 1);
 });
 
+test('extension port rejects web pages and non-extension clients without replacing the bridge', async t => {
+  const f = await fixture(t);
+  const extension = await f.connectExtension();
+  extension.on('message', bytes => respond(extension, JSON.parse(bytes.toString()), 'real extension'));
+  for (const origin of ['https://evil.example', 'null', `chrome-extension://${'a'.repeat(31)}`, undefined]) {
+    const impostor = new WebSocket(`ws://127.0.0.1:${f.daemon.ports.extension}`, origin ? { origin } : {});
+    impostor.on('error', () => {});
+    const [, response] = await once(impostor, 'unexpected-response');
+    assert.equal(response.statusCode, 403);
+    response.resume(); impostor.terminate();
+  }
+  assert.equal(await f.remote.request('browser.observe'), 'real extension');
+});
+
 test('extension replacement cancels old requests and accepts new snapshots', async t => {
   const f = await fixture(t);
   const old = await f.connectExtension();
@@ -146,7 +161,7 @@ test('reconnecting after daemon loss never replays an in-flight action', async t
   const replacement = new BraiserDaemon({ extensionPort: ports.extension, clientPort: ports.client, localToken, remoteToken });
   await replacement.ready;
   t.after(() => replacement.close());
-  const newExtension = new WebSocket(`ws://127.0.0.1:${ports.extension}`);
+  const newExtension = new WebSocket(`ws://127.0.0.1:${ports.extension}`, { origin: extensionOrigin });
   await once(newExtension, 'open'); t.after(() => newExtension.terminate());
   const seen = [];
   newExtension.on('message', bytes => {

@@ -96,9 +96,9 @@ SSH 默认只申请服务器回环地址，服务端应保持 `GatewayPorts no` 
 | SSH 登录失败/超时 | 检查正常 SSH 登录；命令等待登录最多 120 秒 |
 | remote forwarding failed | 远程端口被占用、转发被禁或确认超时；不会显示已就绪 |
 | daemonConnected=false | 隧道/本机 daemon 不可用，或凭据不对；查看 status 的 error |
-| extensionConnected=false | 打开本机扩展 Bridge 页面并检查扩展端口 |
+| extensionConnected=false | 打开本机扩展 Bridge 页面并检查扩展端口；扩展端口只接受 `chrome-extension://` 来源，其他来源得到 403（见 [D-0011](../user-spec/decisions/0011-extension-port-origin.md)） |
 | operation outcome is unknown | 动作可能已执行；重新 observe 后再决定，不直接重试提交 |
 
 ## 验证边界
 
-`npm test` 构建扩展与 MCP，使用随机回环端口的临时 daemon、模拟扩展、真实 MCP stdio，以及假的 SSH 可执行程序验证启动确认、失败和清理。不连接真实服务器或浏览器，不验证真实 sshd 策略与登录；实际启用时仍需端到端验收。测试不读写生产凭据。
+`npm test` 构建扩展与 MCP，使用随机回环端口的临时 daemon、模拟扩展（带扩展来源）、真实 MCP stdio，以及假的 SSH 可执行程序验证启动确认、失败和清理。不连接真实服务器或浏览器，不验证真实 sshd 策略与登录；实际启用时仍需端到端验收。测试不读写生产凭据。

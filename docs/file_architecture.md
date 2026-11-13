@@ -25,7 +25,7 @@
 | [lifecycle.ts](../mcp/src/lifecycle.ts) | 本机 daemon 就绪检查与按需启动；远程不启动 daemon |
 | [websocket.ts](../mcp/src/websocket.ts) | 认证 WebSocket client、请求关联、超时、断线处理 |
 | [daemon.ts](../mcp/src/daemon.ts) | daemon 进程入口，准备凭据、监听并处理退出 |
-| [daemon-server.ts](../mcp/src/daemon-server.ts) | 两个回环监听端口、客户端认证和身份、扩展请求路由 |
+| [daemon-server.ts](../mcp/src/daemon-server.ts) | 两个回环监听端口、客户端认证和身份、扩展来源校验、扩展请求路由 |
 | [remote.ts](../mcp/src/remote.ts) | 前台远程访问入口，编排 daemon、隧道与状态显示 |
 | [ssh-tunnel.ts](../mcp/src/ssh-tunnel.ts) | 参数校验、独立 OpenSSH master、转发确认和子进程清理 |
 | [cli.ts](../mcp/src/cli.ts) | 原调试/下载 CLI，复用连接配置和生命周期；远程禁止文件导出 |
