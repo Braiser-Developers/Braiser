@@ -5,7 +5,7 @@ import { clientConfig } from "./config.js";
 import { clientToken } from "./auth.js";
 import { ensureDaemon } from "./lifecycle.js";
 import { ExtensionBridge } from "./websocket.js";
-import type { ActiveTabInfo, AgentHtmlSnapshot, BrowserTabInfo, BrowserTabList, ReadablePage } from "./protocol.js";
+import type { ActiveTabInfo, BrowserTabInfo, BrowserTabList, PageSnapshot, ReadablePage } from "./protocol.js";
 import {
   DOWNLOADS_DIR,
   fileStamp,
@@ -131,11 +131,11 @@ async function downloadRuntimeDom(bridge: ExtensionBridge): Promise<string> {
 async function downloadObservedOutput(bridge: ExtensionBridge): Promise<string> {
   const [tab, snapshot] = await Promise.all([
     bridge.request<ActiveTabInfo>("browser.get_active_tab", undefined, 10000),
-    bridge.request<AgentHtmlSnapshot>("browser.observe", undefined, 30000)
+    bridge.request<PageSnapshot>("browser.observe", undefined, 30000)
   ]);
   const pageName = hostFromUrl(tab.url) || tab.title || snapshot.snapshotId;
-  const fileName = `${fileStamp()}-${slugify(pageName)}-${snapshot.snapshotId}-observed-output.html`;
-  return writeDownload(fileName, snapshot.html);
+  const fileName = `${fileStamp()}-${slugify(pageName)}-${snapshot.snapshotId}-observed-output.txt`;
+  return writeDownload(fileName, snapshot.text);
 }
 
 async function downloadMarkdown(bridge: ExtensionBridge): Promise<string> {

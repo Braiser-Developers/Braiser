@@ -1,4 +1,4 @@
-import type { ActiveTabInfo, AgentHtmlSnapshot, PopupStatus, ReadablePage } from "./protocol.js";
+import type { ActiveTabInfo, PageSnapshot, PopupStatus, ReadablePage } from "./protocol.js";
 
 const connectionState = getElement("connectionState");
 const bridgeStatus = getElement("bridgeStatus");
@@ -96,13 +96,13 @@ async function downloadRuntimeDom(): Promise<void> {
 async function downloadObservedOutput(): Promise<void> {
   setButtonBusy(downloadObserveButton, true);
   try {
-    const snapshot = await sendRuntimeMessage<AgentHtmlSnapshot>({
+    const snapshot = await sendRuntimeMessage<PageSnapshot>({
       type: "popup.get_observed_output"
     });
     downloadTextFile(
-      `${fileStamp()}-${snapshot.snapshotId}-observed-output.html`,
-      snapshot.html,
-      "text/html"
+      `${fileStamp()}-${snapshot.snapshotId}-observed-output.txt`,
+      snapshot.text,
+      "text/plain"
     );
   } finally {
     setButtonBusy(downloadObserveButton, false);

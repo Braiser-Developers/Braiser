@@ -6,7 +6,8 @@
   "scripts": {
     "postinstall": "npm run setup:markdown",
     "build": "npm run build:extension && npm run build:mcp",
-    "build:extension": "tsc -p extension/tsconfig.json",
+    "build:extension": "tsc -p extension/tsconfig.json --noEmit && node scripts/build-extension.mjs",
+    "vendor:playwright": "node scripts/vendor-playwright.mjs",
     "build:mcp": "tsc -p mcp/tsconfig.json",
     "check": "npm run build",
     "setup:markdown": "node scripts/setup-markdown.mjs",
@@ -23,7 +24,8 @@
     "mcp": "node mcp/dist/server.js",
     "daemon": "node mcp/dist/daemon.js",
     "remote": "node mcp/dist/remote.js remote",
-    "test": "npm run build && node --test mcp/test/*.test.mjs"
+    "test": "npm run build && node --test mcp/test/*.test.mjs extension/test/*.test.mjs",
+    "test:e2e": "npm run build && node --test mcp/test/e2e/*.e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -33,6 +35,9 @@
     "@types/chrome": "^0.0.306",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
-    "typescript": "^5.7.2"
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.65.0",
+    "typescript": "^5.7.2",
+    "yaml": "^2.9.1"
   }
 }

@@ -37,14 +37,18 @@
 
 ## Chrome 扩展
 
-扩展本次没有代码变动。Bridge 页面保持 WebSocket，避免 MV3 service worker 休眠中断长连接。
+Bridge 页面保持 WebSocket，避免 MV3 service worker 休眠中断长连接。页面观察与操作见 [observe_act.md](observe_act.md)。
 
 | 文件 | 职责 |
 |---|---|
 | [manifest.json](../extension/manifest.json) | MV3 权限和入口 |
 | [debug.ts](../extension/src/debug.ts) | 连接本机 17832，转发 runtime message，显示状态日志 |
-| [background.ts](../extension/src/background.ts) | Braised 标签组焦点与标签管理、浏览器下载/上传、CDP 与脚本执行；observe 时补充 CDP isClickable |
-| [content.ts](../extension/src/content.ts) | 生成 agent-html、维护快照 registry、执行有限动作集合 |
+| [background.ts](../extension/src/background.ts) | Braised 标签组焦点与标签管理、浏览器下载/上传、CDP 与脚本执行；按 frame 注入 content script、拼接各 frame 快照、执行动作并比较前后清单 |
+| [content.ts](../extension/src/content.ts) | content script 入口：处理 observe、清单、动作和正文读取消息，维护本 frame 的快照 registry |
+| [observe/snapshot.ts](../extension/src/observe/snapshot.ts) | 调用 Playwright 生成无障碍树，分配编号，列出隐藏的文件输入框 |
+| [observe/render.ts](../extension/src/observe/render.ts) | 纯函数：输出格式、可操作元素判定、动作前后清单比较 |
+| [observe/frames.ts](../extension/src/observe/frames.ts) | 通过 postMessage 把 `<iframe>` 元素对应到 frame id |
+| [vendor/playwright/injected/ariaSnapshot.ts](../extension/src/vendor/playwright/injected/ariaSnapshot.ts) 等 | 复制的 Playwright 识别代码（v1.65.0，Apache-2.0，见同目录 [LICENSE](../extension/src/vendor/playwright/LICENSE)），不直接修改 |
 | [popup.ts](../extension/src/popup.ts) | 状态 UI、打开 Bridge、手工导出 |
 | [protocol.ts](../extension/src/protocol.ts) | 扩展内部消息类型；网络客户端认证不涉及扩展协议 |
 
@@ -52,4 +56,8 @@
 
 [setup-markdown.mjs](../scripts/setup-markdown.mjs) 创建项目 Python 环境；[预处理脚本](../scripts/preprocess-markdown-html.py) 和 [MarkItDown 包装](../scripts/markitdown-braiser.py) 保留数学内容。依据见 [D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。
 
-[根 package.json](../package.json) 提供 build、mcp、daemon、remote、test 和原 CLI 命令。[mcp/package.json](../mcp/package.json) 保留原 bin 并增加 braiser 入口。构建输出到 extension/dist 与 mcp/dist，不跟踪产物，不直接编辑。
+[build-extension.mjs](../scripts/build-extension.mjs) 用 esbuild 打包扩展，[vendor-playwright.mjs](../scripts/vendor-playwright.mjs) 从固定版本复制 Playwright 代码，依据见 [D-0015](../user-spec/decisions/0015-extension-bundling-and-e2e.md)。
+
+[根 package.json](../package.json) 提供 build、mcp、daemon、remote、test、test:e2e、vendor:playwright 和原 CLI 命令。[mcp/package.json](../mcp/package.json) 保留原 bin 并增加 braiser 入口。构建输出到 extension/dist 与 mcp/dist，不跟踪产物，不直接编辑。
+
+测试：[mcp/test/remote.test.mjs](../mcp/test/remote.test.mjs) 与 [extension/test/render.test.mjs](../extension/test/render.test.mjs) 随 `npm test` 运行；[mcp/test/e2e/observe.e2e.mjs](../mcp/test/e2e/observe.e2e.mjs) 由 `npm run test:e2e` 运行。

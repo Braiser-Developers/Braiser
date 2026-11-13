@@ -6,7 +6,6 @@ import { basename, isAbsolute } from "node:path";
 import type { ExtensionBridge } from "./websocket.js";
 import type {
   ActiveTabInfo,
-  AgentHtmlSnapshot,
   BrowserActInput,
   BrowserActResult,
   BrowserCloseTabInput,
@@ -25,6 +24,7 @@ import type {
   DebugCdpCommandResult,
   DebugInjectJsInput,
   DebugInjectJsResult,
+  PageSnapshot,
   ReadablePage
 } from "./protocol.js";
 import { readablePageToMarkdown } from "./markdown.js";
@@ -162,7 +162,7 @@ export const tools: Tool[] = [
   },
   {
     name: "browser.observe",
-    description: "Observe the current agent focus tab in the Braised tab group and return full DOM-derived agent-html with data-eid handles for interactive elements.",
+    description: "Observe the current agent focus tab in the Braised tab group. Returns the whole page as an indented accessibility outline in the text field: roles, accessible names, all text, current form values and states such as [checked] or [expanded], including shadow DOM and iframes. Actionable elements carry ids such as [E12] (F1E3 inside an iframe); prose is written inline as [link text](E12 /url). Use these ids with browser.act.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -171,7 +171,7 @@ export const tools: Tool[] = [
   },
   {
     name: "browser.act",
-    description: "Act on an element from the latest browser.observe snapshot by snapshotId and elementId.",
+    description: "Act on an element from the latest browser.observe snapshot by snapshotId and elementId. Returns ok plus coarse changes only: whether the page navigated, new URL or title, new tabs, downloads, and actionable elements that appeared or disappeared (role and name, capped). It never returns page text; call browser.observe when details are needed. snapshotValid tells whether ids from this snapshot can still be used.",
     inputSchema: {
       type: "object",
       properties: {
@@ -181,7 +181,7 @@ export const tools: Tool[] = [
         },
         elementId: {
           type: "string",
-          description: "Element id from agent-html data-eid, such as E2."
+          description: "Element id from the snapshot, such as E2 or F1E3."
         },
         action: {
           type: "string",
@@ -204,7 +204,7 @@ export const tools: Tool[] = [
         },
         value: {
           type: "string",
-          description: "Option value for select-option."
+          description: "Option value or visible label for select-option."
         },
         checked: {
           type: "boolean",
@@ -227,7 +227,7 @@ export const tools: Tool[] = [
         },
         elementId: {
           type: "string",
-          description: "Element id for an input[type=file] in agent-html, such as E7."
+          description: "Element id of a file input in the snapshot (a button or an entry under hidden file inputs), such as E7."
         },
         files: {
           type: "array",
@@ -340,7 +340,7 @@ export async function callTool(
       return bridge.request<BrowserDownloadResult>("browser.download", assertBrowserDownloadInput(args));
 
     case "browser.observe":
-      return bridge.request<AgentHtmlSnapshot>("browser.observe");
+      return bridge.request<PageSnapshot>("browser.observe");
 
     case "browser.act":
       return bridge.request<BrowserActResult>("browser.act", assertBrowserActInput(args));

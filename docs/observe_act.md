@@ -1,52 +1,90 @@
 # 页面观察、操作与正文读取
 
-设计依据：[D-0001](../user-spec/decisions/0001-existing-browser-architecture.md)。本文描述 `browser.observe`、`browser.act`、`page.extract_readable_text` 当前的实际行为；早期设计草稿见 [Observe/Act 草稿](todo/browser-agent-dom-mvp-agent-html.md)（部分已过时）。改动 [content.ts](../extension/src/content.ts) 的过滤、序列化或动作实现时，同步更新本文。
+设计依据：[D-0013](../user-spec/decisions/0013-playwright-recognition-layer.md)（识别照搬 Playwright）、[D-0016](../user-spec/decisions/0016-observe-output-format.md)（输出格式与 iframe）、[D-0014](../user-spec/decisions/0014-lean-action-result.md)（动作结果）。改动 [snapshot.ts](../extension/src/observe/snapshot.ts)、[render.ts](../extension/src/observe/render.ts) 或 [frames.ts](../extension/src/observe/frames.ts) 时，同步更新本文。
 
 ## 链路
 
-background 找到 Braised 标签组的焦点页面，每次请求都用 `chrome.scripting.executeScript` 向顶层 frame 注入 content script（脚本自带防重复安装）。observe 先通过 CDP 补充可点击元素，再由 content script 生成 agent-html 和元素登记表（registry）。
+1. background 找到 Braised 标签组的焦点页面，先在所有 frame 里探测 content script，只给缺少的 frame 注入 `dist/content.js`（esbuild 打包的经典脚本，见 [D-0015](../user-spec/decisions/0015-extension-bundling-and-e2e.md)）。
+2. background 告诉每个 frame 它自己的 frame id，然后向每个 frame 发 observe。所有发往 content script 的消息都指定 `frameId`。
+3. 每个 frame 用 Playwright 的 `generateAriaTree(document.body, { mode: "ai" })` 生成无障碍树，再由 [render.ts](../extension/src/observe/render.ts) 渲染。遇到 iframe 时，父 frame 通过 postMessage 询问子窗口的 frame id（[frames.ts](../extension/src/observe/frames.ts)），在输出里留占位符。
+4. background 把各 frame 的输出按占位符拼接，记录本次快照的编号和 frame 前缀（存在 `chrome.storage.session`，service worker 重启后仍可用），返回 `{ snapshotId, format: "braiser-aria", text, meta }`。
 
-## browser.observe
+## 识别层（Playwright v1.65.0）
 
-1. **可交互元素**：两种来源合并去重。
-   - 选择器：`a[href]`、`button`、非 hidden 的 `input`、`textarea`、`select`、`summary`、`[contenteditable='true']`、若干 ARIA role（button、link、textbox、checkbox、radio、menuitem、tab）、`[tabindex='0']`、`[aria-haspopup]`、`[aria-expanded]`、`[onclick]`。
-   - CDP：`DOMSnapshot.captureSnapshot` 的 `isClickable`。background 在 content script 的 isolated world 里用 `DOM.resolveNode` 和 `Runtime.callFunctionOn` 把节点交给 content script，不往真实 DOM 写临时属性。这一步失败时静默跳过。
-   - 过滤：排除 `script`、`style`、`svg` 内的元素；要求可见（宽高大于 0 且未被隐藏），`input[type=file]` 例外。
-2. **建树**：从 `document.body` 遍历子节点。丢弃 `script`、`style`、`link`、`meta`、`svg`、`path`，以及带 `hidden`、`display:none`、`visibility:hidden`、`opacity:0` 的整棵子树；既不是 HTML 也不是 SVG 的元素（例如 MathML 的 `<math>`）同样被当作不可见整棵丢弃。隐藏子树里的 file input 仍保留。
-3. **属性**：只保留 `href`、`type`、`role`、`aria-label`、`aria-labelledby`、`aria-expanded`、`aria-checked`、`aria-selected`、`aria-haspopup`、`placeholder`、`title`、`alt`、`value`、`disabled`、`accept`、`multiple`、`capture`、`webkitdirectory`、`aria-hidden`、`contenteditable`、`data-testid`，file input 另加 `id`、`name`。属性读取的是 HTML 属性（`getAttribute`），不是元素当前状态；超过 200 字符的属性丢弃，`href` 超过 180 字符截断。
-4. **简化**：没有保留属性、不可交互的 `div` 和 `span` 是透明包装：空的删除，只含文本的换成文本，只有一个子节点的折叠成子节点。相邻的单行文本合并成一行。
-5. **编号**：简化之后按文档顺序分配 `data-eid="E1"` 起的编号，registry 只记录最终输出里出现的元素。快照编号 `S1`、`S2`……逐次递增，页面里只保留最近一次快照。
-6. **文本截断**：每一段文本（合并后的连续行内文本或单独一行）最多 120 个字符，超出部分以 `...` 结尾。
-7. **渲染**：每层缩进两个空格，深度每 6 层回到零缩进。整段输出超过 300000 个字符时从尾部截断，并设置 `meta.truncated`。`meta.debug` 是 CDP 补充链路的诊断计数。
+代码在 `extension/src/vendor/playwright/`（入口 [ariaSnapshot.ts](../extension/src/vendor/playwright/injected/ariaSnapshot.ts)），由 `npm run vendor:playwright` 复制，只改了 import 路径。行为要点（详见 [Playwright MCP 资料](../references/Playwright-MCP.md)）：
+
+- 按 ARIA 规范计算角色和可访问名称（`<label for>`、aria-label、alt、内容文字等）。
+- 记录 checked、disabled、expanded、invalid、level、pressed、selected、active 等状态；输入框和文本框的当前值作为文字。
+- 进入 shadow DOM 和 slot；对无障碍树可见或视觉可见的元素都保留。
+- 给可见且能接收指针事件的元素分配内部 ref，并记录光标是否为指针。
+
+## 输出格式
+
+```text
+- page "API Tokens" → https://example.com/settings/tokens
+- main:
+  - heading "Create API token" [level=1]
+  - paragraph: Tokens expire after [30 days](E3 /docs/expiry) by default.
+  - textbox "Token name" [E4]: my token
+  - checkbox "Read access" [checked] [E5]
+  - combobox "Expiration" [E6]:
+    - option "7 days"
+    - option "30 days" [selected]
+  - button "Create token" [E7]
+  - iframe "Captcha":
+    - button "I'm not a robot" [F1E1]
+- hidden file inputs:
+  - file input [E8] accept=".pem"
+```
+
+- 编号只给可操作元素：交互角色，以及最外层带指针光标的元素。iframe 内编号带 `F1` 这样的前缀。
+- 文字全部保留；含文字的段落写成一行，行内链接为 `[文字](编号 网址)`，非链接的可操作元素在编号后注明角色。
+- 同源网址只写路径；只重复链接、按钮名称的内部文字不再展开。
+- 整份快照超过 30 万字符时截断，`meta.truncated` 为 true。
 
 ## browser.act
 
-先确认 `snapshotId` 是最近一次快照、元素仍在文档中、可见且没有 `disabled` / `aria-disabled="true"`，然后执行：
+1. background 按编号前缀找到 frame，确认快照编号是当前的、目标页面仍是焦点页面。
+2. 动作前在所有 frame 收集一份"角色 + 名称"清单。
+3. 目标 frame 执行动作：确认元素仍在文档中（含 shadow DOM）、可见、未禁用。
 
 | 动作 | 实现 |
 |---|---|
 | `click` | `HTMLElement.click()` |
-| `input-text` | input/textarea 直接设置 `value`，contenteditable 设置 `textContent`；`clearFirst` 默认 true；随后派发 `input` 和 `change` |
-| `select-option` | 设置 `select.value`，派发 `input` 和 `change` |
-| `toggle` | checkbox/radio 设置 `checked`（不传则取反）并派发事件；其他元素调用 `click()` |
+| `input-text` | input/textarea 设置 `value`，contenteditable 设置 `textContent`；`clearFirst` 默认 true；随后派发 `input` 和 `change` |
+| `select-option` | 按选项的值或显示文字选择，派发 `input` 和 `change` |
+| `toggle` | checkbox/radio 设置 `checked`（不传则取反）并派发事件；其他元素 `click()` |
 | `focus` | `focus()` |
 | `scroll-into-view` | `scrollIntoView({ block: "center", inline: "center" })` |
 
-这些都是脚本合成的事件（`isTrusted=false`）。成功时返回 `shouldObserveAgain: true`，调用方应重新 observe。
+4. 等待约 0.4 秒；页面在加载就继续等到加载完（最多 10 秒）。期间记录新开的标签页和开始的下载。
+5. 再收集一次清单，返回：
+
+```json
+{ "ok": true, "snapshotValid": true,
+  "changes": { "added": ["button \"Confirm\"", "button \"Cancel\""], "addedCount": 2 } }
+```
+
+`changes` 可能包含 `navigated`、`url`、`title`、`newTabs`、`downloads`、`added`/`removed`（各最多 15 条）及总数。页面换成新文档时只报告跳转，`snapshotValid` 为 false。不返回任何页面文字。
+
+## browser.upload
+
+按快照编号在各 frame 的 content script 隔离环境里找到文件输入框，通过 CDP `DOM.setFileInputFiles` 设置文件。主 frame 和同进程的 iframe 可用。
 
 ## page.extract_readable_text
 
-content script 返回 `document.documentElement.outerHTML`（运行时 DOM），MCP 所在主机按 [Markdown 协议](markdown_pipeline.md) 转成 Markdown，放在 `text` 字段返回，不截断。结果里没有 `data-eid`，不能直接用来操作。content script 同时计算的可见文本（`ReadablePage.text`）目前没有被 MCP 使用。
+只读主 frame：content script 返回 `document.documentElement.outerHTML`，MCP 所在主机按 [Markdown 协议](markdown_pipeline.md) 转成 Markdown，不截断，没有元素编号。
 
 ## 当前局限
 
-以下按代码核对，标「实测」的见 [2026-11-13 observe 实测](../references/observe-measurement-2026-11-13.md)。
+- 动作是合成事件（`isTrusted=false`），部分网站不响应；富文本编辑器通常不认直接改写的 `textContent`（推断，未实测）。
+- 没有交互角色、也没设指针光标的 JS 可点击元素拿不到编号。
+- 浏览器原生对话框（alert、confirm）会阻塞页面，动作结果无法报告。
+- 跨源 iframe 里的文件输入框无法上传。
+- 正文读取不包含 iframe 和 shadow DOM 内容，也不经过 CSS 计算（推断，未实测）。
+- 体积：2026-11-13 在测试 Chromium 中，英文维基约 24.6k token、中文维基约 18.5k、GitHub 仓库页约 13.1k（o200k 分词器）；其中网址约占 25%–30%。见 [2026-11-13 浏览器快照 token 实测](../references/browser-snapshot-tokens-2026-11-13.md)。
 
-- observe 看不到表单当前状态：输入框显示的是初始 `value` 属性，复选框是否勾选、下拉框当前选项、textarea 当前内容都不显示。Agent 填写后无法通过 observe 确认结果。（实测）
-- observe 不进入 shadow DOM 和 iframe，其中的文字和按钮都不出现。（实测）
-- observe 中超过 120 字符的文本段会被截断，长段落读不全。（实测）
-- observe 丢弃 MathML 等非 HTML/SVG 元素，只靠 MathML 表达的公式不会出现。
-- observe 不包含元素是否在视口内、页面滚动位置等信息；没有按距离滚动页面的动作。
-- 动作是合成事件，部分网站不响应；富文本编辑器（ProseMirror、Lexical 等）通常不认直接改写的 `textContent`。（推断，未实测）
-- 正文读取基于 outerHTML，不经过 CSS 计算：CSS 隐藏的内容也会出现，shadow DOM 和 iframe 内容不会出现。（推断，未实测）
-- 整页 observe 在大页面上很大：英文维基一页约 3 万 token，只比 Playwright MCP、Chrome DevTools MCP 的整页快照少约 20%；在 GitHub 仓库页上超过 30 秒超时，原因未查明。（实测，见 [2026-11-13 浏览器快照 token 实测](../references/browser-snapshot-tokens-2026-11-13.md)）
+## 测试
+
+- `npm test` 包含 [render.test.mjs](../extension/test/render.test.mjs)：渲染格式、编号规则、行内处理、清单比较。
+- `npm run test:e2e` 运行 [observe.e2e.mjs](../mcp/test/e2e/observe.e2e.mjs)：在 Chromium 里加载扩展，经真实 daemon 验证表单当前值、shadow DOM、iframe、长文字、动作结果、上传和跳转。需要先 `npx playwright-core install chromium`。

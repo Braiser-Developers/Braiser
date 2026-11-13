@@ -68,7 +68,7 @@
 
 | 编号 | 标题 | 状态 |
 |---|---|---|
-| [D-0001](0001-existing-browser-architecture.md) | 保留既有浏览器桥接与 Observe/Act 架构 | 有效 |
+| [D-0001](0001-existing-browser-architecture.md) | 保留既有浏览器桥接与 Observe/Act 架构 | 部分被取代（→ [D-0016](0016-observe-output-format.md)） |
 | [D-0002](0002-remote-access.md) | 采用 SSH 反向隧道并区分本机与远程模式 | 有效 |
 | [D-0003](0003-credentials-and-tools.md) | 用两种凭据在 daemon 和 MCP 同时限制远程能力 | 有效 |
 | [D-0004](0004-foreground-ssh-launcher.md) | 用前台入口管理一条独立 SSH 隧道 | 有效 |
@@ -80,5 +80,7 @@
 | [D-0010](0010-user-spec-recording-standard.md) | 同步新版记录规则并按主题整理需求总览 | 有效 |
 | [D-0011](0011-extension-port-origin.md) | 扩展端口只接受 Chrome 扩展来源的连接 | 有效 |
 | [D-0012](0012-internal-cdp.md) | Braiser 内部可以使用 CDP，Agent 只用固定动作 | 有效 |
-| [D-0013](0013-playwright-recognition-layer.md) | 页面识别照搬 Playwright，输出格式自己做 | 有效（未实现） |
-| [D-0014](0014-lean-action-result.md) | 动作后只返回成败和大的变化 | 有效（未实现） |
+| [D-0013](0013-playwright-recognition-layer.md) | 页面识别照搬 Playwright，输出格式自己做 | 有效 |
+| [D-0014](0014-lean-action-result.md) | 动作后只返回成败和大的变化 | 有效 |
+| [D-0015](0015-extension-bundling-and-e2e.md) | 用 esbuild 打包扩展，用 Playwright 驱动的 Chromium 做端到端测试 | 有效 |
+| [D-0016](0016-observe-output-format.md) | observe 的输出格式与 iframe 拼接 | 有效 |

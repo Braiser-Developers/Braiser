@@ -1,7 +1,7 @@
 import {
   BRAISER_WS_URL,
   type ActiveTabInfo,
-  type AgentHtmlSnapshot,
+  type BrowserActChanges,
   type BrowserActInput,
   type BrowserActResult,
   type BrowserCloseTabInput,
@@ -15,31 +15,35 @@ import {
   type BrowserUploadInput,
   type BrowserUploadResult,
   type BridgeRuntimeRequest,
+  type ContentActResult,
+  type ContentInventory,
+  type ContentRequest,
   type DebugCdpCommandInput,
   type DebugCdpCommandResult,
   type DebugInjectJsInput,
   type DebugInjectJsResult,
   type ExtensionRequest,
+  type FrameSnapshotResult,
+  type PageSnapshot,
   type PopupRequest,
   type PopupStatus,
   type ReadablePage
 } from "./protocol.js";
+import { diffInventories, FRAME_TOKEN_PATTERN } from "./observe/render.js";
 
 type ActiveChromeTab = chrome.tabs.Tab & { id: number };
 const TARGET_TAB_GROUP_TITLE = "Braised";
 const CDP_BRIDGE_GLOBAL = "__braiserCdpBridge";
 const FOCUSED_TAB_STORAGE_KEY = "focusedBraisedTabId";
+const SNAPSHOT_STORAGE_KEY = "braiserSnapshot";
+const MAX_SNAPSHOT_LENGTH = 300000;
+const ELEMENT_ID_PATTERN = /^(?:(F\d+))?E\d+$/;
 
-interface CdpSnapshotResult {
-  documents?: Array<{
-    nodes?: {
-      backendNodeId?: number[];
-      isClickable?: {
-        index?: number[];
-      };
-      nodeType?: number[];
-    };
-  }>;
+// Kept in session storage because the MV3 service worker can restart between requests.
+interface StoredSnapshot {
+  snapshotId: string;
+  tabId: number;
+  frames: Record<string, number>;
 }
 
 interface CdpExecutionContextDescription {
@@ -57,12 +61,6 @@ interface CdpEvaluateResult {
   result?: {
     type?: string;
     value?: unknown;
-    objectId?: string;
-  };
-}
-
-interface CdpResolveNodeResult {
-  object?: {
     objectId?: string;
   };
 }
@@ -410,23 +408,159 @@ function normalizeDownloadFilename(filename: string): string {
 }
 
 async function extractReadablePage(): Promise<ReadablePage> {
-  return sendContentRequest<ReadablePage>("page.extract_readable_text");
-}
-
-async function observePage(): Promise<AgentHtmlSnapshot> {
   const tab = await getActiveTab();
   await ensureContentScript(tab.id);
-
-  const bridgeRunId = createBridgeRunId();
-  const cdpRegisteredCount = await registerCdpClickableElements(tab.id, bridgeRunId);
-  return sendContentRequestToTab<AgentHtmlSnapshot>(tab.id, "browser.observe", {
-    bridgeRunId,
-    cdpRegisteredCount
-  });
+  return sendContentRequestToFrame<ReadablePage>(tab.id, 0, { type: "page.extract_readable_text" });
 }
 
+// D-0016: every frame renders its own snapshot; iframe placeholders are replaced here.
+async function observePage(): Promise<PageSnapshot> {
+  const tab = await getActiveTab();
+  const frameIds = await ensureContentScript(tab.id);
+  const snapshotId = await nextSnapshotId();
+  const frames: Record<string, number> = { "": 0 };
+  const prefixOf = new Map<number, string>([[0, ""]]);
+  frameIds.filter(frameId => frameId !== 0).forEach((frameId, index) => {
+    frames[`F${index + 1}`] = frameId;
+    prefixOf.set(frameId, `F${index + 1}`);
+  });
+
+  // Children must know their own frame id before parents probe them.
+  await Promise.all(frameIds.map(frameId =>
+    sendContentRequestToFrame(tab.id, frameId, { type: "browser.frame_id", payload: { frameId } }).catch(() => undefined)));
+  const results = new Map<number, FrameSnapshotResult>();
+  await Promise.all(frameIds.map(async frameId => {
+    try {
+      results.set(frameId, await sendContentRequestToFrame<FrameSnapshotResult>(tab.id, frameId, {
+        type: "browser.observe",
+        payload: { snapshotId, idPrefix: prefixOf.get(frameId) ?? "" }
+      }));
+    } catch (error) {
+      if (frameId === 0) throw error;
+    }
+  }));
+  const main = results.get(0);
+  if (!main) throw new Error("Could not observe the page");
+
+  const used = new Set<number>([0]);
+  const expand = (text: string, depth: number): string => text.replace(FRAME_TOKEN_PATTERN, (_line, indent: string, id: string) => {
+    const frameId = Number(id);
+    const frame = results.get(frameId);
+    if (!frame || used.has(frameId) || depth > 8) return `${indent}- text: (frame content unavailable)`;
+    used.add(frameId);
+    const body = expand(frame.text, depth + 1);
+    return body ? body.split("\n").map(line => `${indent}${line}`).join("\n") : `${indent}- text: (empty frame)`;
+  });
+  let text = expand(main.text, 0);
+  let elementCount = 0;
+  for (const frameId of used) elementCount += results.get(frameId)?.elementCount ?? 0;
+
+  await chrome.storage.session.set({ [SNAPSHOT_STORAGE_KEY]: { snapshotId, tabId: tab.id, frames } satisfies StoredSnapshot });
+
+  const header = `- page ${JSON.stringify(tab.title ?? "")} → ${tab.url ?? ""}`;
+  text = text ? `${header}\n${text}` : header;
+  const truncated = text.length > MAX_SNAPSHOT_LENGTH;
+  if (truncated) text = `${text.slice(0, MAX_SNAPSHOT_LENGTH)}\n- text: (snapshot truncated)`;
+  return { snapshotId, format: "braiser-aria", text, meta: { elementCount, frameCount: used.size, truncated } };
+}
+
+async function nextSnapshotId(): Promise<string> {
+  const { braiserSnapshotCounter = 0 } = await chrome.storage.session.get("braiserSnapshotCounter") as { braiserSnapshotCounter?: number };
+  await chrome.storage.session.set({ braiserSnapshotCounter: braiserSnapshotCounter + 1 });
+  return `S${braiserSnapshotCounter + 1}`;
+}
+
+async function resolveSnapshotFrame(snapshotId: string, elementId: string): Promise<{ tabId: number; frameId: number } | string> {
+  const match = ELEMENT_ID_PATTERN.exec(elementId);
+  if (!match) return `Element id ${elementId} is not valid. Use an id such as E3 or F1E3 from browser.observe.`;
+  const stored = (await chrome.storage.session.get(SNAPSHOT_STORAGE_KEY))[SNAPSHOT_STORAGE_KEY] as StoredSnapshot | undefined;
+  if (!stored || stored.snapshotId !== snapshotId) return `Snapshot ${snapshotId} is not active. Please call browser.observe again.`;
+  const frameId = stored.frames[match[1] ?? ""];
+  if (frameId === undefined) return `Element ${elementId} is not in snapshot ${snapshotId}.`;
+  return { tabId: stored.tabId, frameId };
+}
+
+// D-0014: report success plus coarse changes; page text is never included.
 async function actOnPage(input: BrowserActInput): Promise<BrowserActResult> {
-  return sendContentRequest<BrowserActResult>("browser.act", input);
+  if (!input || typeof input.snapshotId !== "string" || typeof input.elementId !== "string") {
+    return { ok: false, error: "invalid_input", message: "browser.act requires snapshotId and elementId.", snapshotValid: false };
+  }
+  const target = await resolveSnapshotFrame(input.snapshotId, input.elementId);
+  if (typeof target === "string") return { ok: false, error: "invalid_snapshot", message: target, snapshotValid: false };
+  const tab = assertTabId(await chrome.tabs.get(target.tabId));
+  const focused = await getActiveTab();
+  if (focused.id !== tab.id) {
+    return { ok: false, error: "invalid_snapshot", message: "The snapshot belongs to another tab. Please call browser.observe again.", snapshotValid: false };
+  }
+
+  const before = await collectInventory(tab.id, input.snapshotId);
+  const newTabs: Array<{ tabId: number; url: string }> = [];
+  const downloads: string[] = [];
+  const onTab = (created: chrome.tabs.Tab) => {
+    if (created.openerTabId === tab.id && created.id !== undefined) newTabs.push({ tabId: created.id, url: created.pendingUrl ?? created.url ?? "" });
+  };
+  const onDownload = (item: chrome.downloads.DownloadItem) => { downloads.push(item.finalUrl || item.url); };
+  chrome.tabs.onCreated.addListener(onTab);
+  chrome.downloads.onCreated.addListener(onDownload);
+  try {
+    const result = await sendContentRequestToFrame<ContentActResult>(tab.id, target.frameId, { type: "browser.act", payload: input });
+    if (!result.ok) return { ...result, snapshotValid: result.error !== "invalid_snapshot" && result.error !== "stale_element" };
+    await waitForPageToSettle(tab.id);
+  } finally {
+    chrome.tabs.onCreated.removeListener(onTab);
+    chrome.downloads.onCreated.removeListener(onDownload);
+  }
+
+  const afterTab = await chrome.tabs.get(tab.id);
+  const after = await collectInventory(tab.id, input.snapshotId);
+  const changes: BrowserActChanges = {};
+  const navigated = !after.hasSnapshot || afterTab.url !== tab.url;
+  if (navigated) changes.navigated = true;
+  if (afterTab.url !== tab.url) changes.url = afterTab.url ?? "";
+  if (afterTab.title !== tab.title) changes.title = afterTab.title ?? "";
+  for (const created of newTabs) {
+    const current = await chrome.tabs.get(created.tabId).catch(() => undefined);
+    created.url = current?.pendingUrl || current?.url || created.url;
+  }
+  if (newTabs.length) changes.newTabs = newTabs;
+  if (downloads.length) changes.downloads = downloads;
+  // After a new document loads, listing every old element as removed is noise; navigation is the change.
+  if (after.hasSnapshot) {
+    const diff = diffInventories(before.items, after.items);
+    if (diff.addedCount) { changes.added = diff.added; changes.addedCount = diff.addedCount; }
+    if (diff.removedCount) { changes.removed = diff.removed; changes.removedCount = diff.removedCount; }
+  }
+  return { ok: true, snapshotValid: after.hasSnapshot, changes };
+}
+
+async function collectInventory(tabId: number, snapshotId: string): Promise<{ items: string[]; hasSnapshot: boolean }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const frameIds = await ensureContentScript(tabId);
+      const results = await Promise.all(frameIds.map(frameId =>
+        sendContentRequestToFrame<ContentInventory>(tabId, frameId, { type: "browser.inventory", payload: { snapshotId } })
+          .then(result => ({ frameId, result }))
+          .catch(() => undefined)));
+      const main = results.find(entry => entry?.frameId === 0);
+      if (!main) throw new Error("main frame unavailable");
+      return { items: results.flatMap(entry => entry?.result.items ?? []), hasSnapshot: main.result.hasSnapshot };
+    } catch {
+      await delay(300);
+    }
+  }
+  return { items: [], hasSnapshot: false };
+}
+
+// Gives the page a moment to react; waits for a started navigation to finish (bounded).
+async function waitForPageToSettle(tabId: number): Promise<void> {
+  await delay(400);
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!tab || tab.status !== "loading") break;
+    await delay(200);
+  }
+  await delay(100);
 }
 
 async function uploadFiles(input: BrowserUploadInput): Promise<BrowserUploadResult> {
@@ -446,18 +580,7 @@ async function uploadFiles(input: BrowserUploadInput): Promise<BrowserUploadResu
 
   try {
     return await withDebuggerSession(tab.id, async (target) => {
-      const contextId = await findCdpBridgeContextId(target);
-      if (!contextId) {
-        return uploadFailure("upload_target_unavailable", "Could not access the active observe snapshot.");
-      }
-
-      const resolved = await chrome.debugger.sendCommand(target, "Runtime.evaluate", {
-        expression: `globalThis.${CDP_BRIDGE_GLOBAL}?.getSnapshotElement(${JSON.stringify(input.snapshotId)}, ${JSON.stringify(input.elementId)}) ?? null`,
-        contextId,
-        returnByValue: false,
-        silent: true
-      }) as CdpEvaluateResult;
-      const objectId = resolved.result?.objectId;
+      const objectId = await findSnapshotElementObject(target, input.snapshotId, input.elementId);
       if (!objectId) {
         return uploadFailure(
           "stale_element",
@@ -585,139 +708,40 @@ async function sendDebugCdpCommand(input: DebugCdpCommandInput): Promise<DebugCd
   };
 }
 
-async function registerCdpClickableElements(tabId: number, bridgeRunId: string): Promise<number> {
-  try {
-    return await withDebuggerSession(tabId, async (target) => {
-      const contextId = await findCdpBridgeContextId(target);
-      if (!contextId) {
-        return 0;
-      }
-
-      const snapshot = await chrome.debugger.sendCommand(
-        target,
-        "DOMSnapshot.captureSnapshot",
-        { computedStyles: [] }
-      ) as CdpSnapshotResult;
-      const nodes = snapshot.documents?.[0]?.nodes;
-      const clickableIndexes = nodes?.isClickable?.index ?? [];
-      const backendNodeIds = nodes?.backendNodeId ?? [];
-      const nodeTypes = nodes?.nodeType ?? [];
-      let registeredCount = 0;
-
-      for (const nodeIndex of clickableIndexes) {
-        if (nodeTypes[nodeIndex] !== 1) {
-          continue;
-        }
-
-        const backendNodeId = backendNodeIds[nodeIndex];
-        if (!backendNodeId) {
-          continue;
-        }
-
-        if (await registerCdpBackendNode(target, backendNodeId, contextId, bridgeRunId)) {
-          registeredCount++;
-        }
-      }
-
-      return registeredCount;
-    });
-  } catch {
-    // CDP clickability is a best-effort supplement; base observe should still work.
-    return 0;
-  }
-}
-
-async function findCdpBridgeContextId(
-  target: chrome.debugger.Debuggee
-): Promise<number | null> {
+// browser.upload: each frame's content script lives in its own isolated world; try them all.
+async function findSnapshotElementObject(
+  target: chrome.debugger.Debuggee,
+  snapshotId: string,
+  elementId: string
+): Promise<string | null> {
   const contexts: CdpExecutionContextDescription[] = [];
-  const onEvent = (
-    source: chrome.debugger.Debuggee,
-    method: string,
-    params?: unknown
-  ) => {
-    if (source.tabId !== target.tabId || method !== "Runtime.executionContextCreated") {
-      return;
-    }
-
+  const onEvent = (source: chrome.debugger.Debuggee, method: string, params?: unknown) => {
+    if (source.tabId !== target.tabId || method !== "Runtime.executionContextCreated") return;
     const context = (params as { context?: CdpExecutionContextDescription } | undefined)?.context;
-    if (typeof context?.id === "number") {
-      contexts.push(context);
-    }
+    if (typeof context?.id === "number") contexts.push(context);
   };
 
   chrome.debugger.onEvent.addListener(onEvent);
   try {
     await chrome.debugger.sendCommand(target, "Runtime.enable");
     await delay(50);
-
-    const isolatedContexts = contexts.filter((context) => context.auxData?.isDefault === false);
-    const candidates = isolatedContexts.length ? isolatedContexts : contexts;
-    for (const context of candidates) {
-      if (await isCdpBridgeContext(target, context.id)) {
-        return context.id;
+    const isolated = contexts.filter((context) => context.auxData?.isDefault === false);
+    for (const context of isolated.length ? isolated : contexts) {
+      try {
+        const resolved = await chrome.debugger.sendCommand(target, "Runtime.evaluate", {
+          expression: `globalThis.${CDP_BRIDGE_GLOBAL}?.getSnapshotElement(${JSON.stringify(snapshotId)}, ${JSON.stringify(elementId)}) ?? null`,
+          contextId: context.id,
+          returnByValue: false,
+          silent: true
+        }) as CdpEvaluateResult;
+        if (resolved.result?.objectId) return resolved.result.objectId;
+      } catch {
+        // The context may belong to a frame that navigated away.
       }
     }
-
     return null;
   } finally {
     chrome.debugger.onEvent.removeListener(onEvent);
-  }
-}
-
-async function isCdpBridgeContext(
-  target: chrome.debugger.Debuggee,
-  contextId: number
-): Promise<boolean> {
-  try {
-    const result = await chrome.debugger.sendCommand(target, "Runtime.evaluate", {
-      expression: `globalThis.${CDP_BRIDGE_GLOBAL}?.version === 1`,
-      contextId,
-      returnByValue: true,
-      silent: true
-    }) as CdpEvaluateResult;
-
-    return result.result?.value === true;
-  } catch {
-    return false;
-  }
-}
-
-async function registerCdpBackendNode(
-  target: chrome.debugger.Debuggee,
-  backendNodeId: number,
-  executionContextId: number,
-  bridgeRunId: string
-): Promise<boolean> {
-  let objectId: string | undefined;
-  try {
-    const resolved = await chrome.debugger.sendCommand(
-      target,
-      "DOM.resolveNode",
-      { backendNodeId, executionContextId }
-    ) as CdpResolveNodeResult;
-    objectId = resolved.object?.objectId;
-    if (!objectId) {
-      return false;
-    }
-
-    const registration = await chrome.debugger.sendCommand(target, "Runtime.callFunctionOn", {
-      objectId,
-      functionDeclaration: `function(runId) {
-        return globalThis.${CDP_BRIDGE_GLOBAL}?.registerElement(runId, this) === true;
-      }`,
-      arguments: [{ value: bridgeRunId }],
-      returnByValue: true,
-      silent: true
-    }) as CdpCallFunctionResult;
-    return registration.result?.value === true;
-  } catch {
-    return false;
-  } finally {
-    if (objectId) {
-      await chrome.debugger.sendCommand(target, "Runtime.releaseObject", { objectId })
-        .catch(() => undefined);
-    }
   }
 }
 
@@ -739,33 +763,19 @@ async function withDebuggerSession<T>(
   }
 }
 
-function createBridgeRunId(): string {
-  return `cdp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
 }
 
-async function sendContentRequest<T>(type: string, payload?: unknown): Promise<T> {
-  const tab = await getActiveTab();
-  await ensureContentScript(tab.id);
-
-  return sendContentRequestToTab<T>(tab.id, type, payload);
-}
-
-async function sendContentRequestToTab<T>(
-  tabId: number,
-  type: string,
-  payload?: unknown
-): Promise<T> {
-  const response = await chrome.tabs.sendMessage(tabId, { type, payload }) as {
+// Always address one frame: without frameId, Chrome delivers to every frame and takes the first reply.
+async function sendContentRequestToFrame<T>(tabId: number, frameId: number, message: ContentRequest): Promise<T> {
+  const response = await chrome.tabs.sendMessage(tabId, message, { frameId }) as {
     ok: boolean;
     result?: T;
     error?: string;
-  };
+  } | undefined;
 
   if (!response?.ok) {
     throw new Error(response?.error ?? "Content script request failed");
@@ -774,11 +784,23 @@ async function sendContentRequestToTab<T>(
   return response.result as T;
 }
 
-async function ensureContentScript(tabId: number): Promise<void> {
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["dist/content.js"]
-  });
+// Injects the content script into frames that do not have it yet and returns the reachable frame ids.
+async function ensureContentScript(tabId: number): Promise<number[]> {
+  const probes = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: () => !!(globalThis as { __braiserContentState?: { listenerInstalled?: boolean } }).__braiserContentState?.listenerInstalled
+  }).catch(() => [] as chrome.scripting.InjectionResult<boolean>[]);
+  const frameIds = probes.map((probe) => probe.frameId);
+  const missing = probes.filter((probe) => probe.result !== true).map((probe) => probe.frameId);
+  if (!frameIds.includes(0)) {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["dist/content.js"] });
+    return [0];
+  }
+  if (missing.length) {
+    await chrome.scripting.executeScript({ target: { tabId, frameIds: missing }, files: ["dist/content.js"] })
+      .catch(() => undefined);
+  }
+  return frameIds;
 }
 
 chrome.runtime.onMessage.addListener((message: PopupRequest | BridgeRuntimeRequest, _sender, sendResponse) => {
@@ -795,7 +817,7 @@ chrome.runtime.onMessage.addListener((message: PopupRequest | BridgeRuntimeReque
 
 async function handleRuntimeRequest(
   message: PopupRequest | BridgeRuntimeRequest
-): Promise<PopupStatus | ActiveTabInfo | ReadablePage | AgentHtmlSnapshot | unknown> {
+): Promise<PopupStatus | ActiveTabInfo | ReadablePage | PageSnapshot | unknown> {
   if (message.type === "bridge.handle_extension_request") {
     return handleExtensionRequest(message.request);
   }
@@ -805,7 +827,7 @@ async function handleRuntimeRequest(
 
 async function handlePopupRequest(
   message: PopupRequest
-): Promise<PopupStatus | ActiveTabInfo | ReadablePage | AgentHtmlSnapshot> {
+): Promise<PopupStatus | ActiveTabInfo | ReadablePage | PageSnapshot> {
   switch (message.type) {
     case "popup.get_status":
       const { connectionState = "offline" } = await chrome.storage.local.get("connectionState") as {

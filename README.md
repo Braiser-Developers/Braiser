@@ -25,7 +25,7 @@ Chrome 扩展 debug bridge
         -> Braised tab group 中的 agent focus 页面
 ```
 
-第一阶段目标：让本地 Agent 能通过 MCP 稳定观察和操作 Chrome 中受控的目标页面，并拿到清洗后的可读内容或带交互元素编号的 agent-html。
+第一阶段目标：让本地 Agent 能通过 MCP 稳定观察和操作 Chrome 中受控的目标页面，并拿到清洗后的可读内容，或带可操作元素编号的页面大纲。
 
 ## 当前功能
 
@@ -36,8 +36,8 @@ Chrome 扩展 debug bridge
 - Chrome 扩展 debug bridge 与 daemon 通过 `ws://127.0.0.1:17832` 通信。
 - 读取和管理 `Braised` tab group 中的 agent focus 页面。
 - 抽取目标页面并以 Markdown 形式返回正文。
-- 生成带 `data-eid` 的 agent-html。
-- 对 agent-html 中登记过的元素执行点击、输入、选择、切换、聚焦和滚动。
+- 基于 Playwright 的无障碍树生成页面大纲：文字、结构、表单当前值和状态，包括 shadow DOM 与 iframe，可操作元素带 `E12` 这样的编号。
+- 对大纲中的元素执行点击、输入、选择、切换、聚焦和滚动，并只返回成败和大的变化。
 - 将页面保存为本地 Markdown。
 
 ## 环境要求
@@ -162,7 +162,7 @@ npm run switch-tab -- <tabId>
 - `browser.close_tab`：关闭指定 tab 或当前 agent focus tab，并重新选择焦点。
 - `browser.switch_tab`：把 agent focus 切换到 `Braised` tab group 中的指定 tab。
 - `browser.download`：通过 Chrome 原生下载管理器下载 URL 到默认下载目录；相对 URL 会基于当前 agent focus tab 解析，可选传入默认目录下的文件名。
-- `browser.observe`：把目标页面 DOM 转成带 `data-eid` 的 agent-html；除 DOM/ARIA 规则外，也会纳入 CDP `isClickable` 发现的元素。CDP 节点通过 content script bridge 注册进 observe registry，不向真实 DOM 写临时属性。
+- `browser.observe`：返回目标页面的缩进大纲（角色、名称、全部文字、表单当前值和状态），可操作元素带编号，iframe 内编号带 `F1` 前缀。格式见 [页面观察与操作](docs/observe_act.md)。
 - `browser.act`：根据 `snapshotId` 和 `elementId` 执行受控页面动作。
 - `browser.upload`：把本地绝对路径指向的普通文件设置到 observe 快照中的 `<input type="file">`；文件选入后立即返回，不等待网页完成上传或处理。
 - `debug.inject_js`：仅用于调试，向目标页面 MAIN world 注入 JavaScript，并返回 JSON 可序列化结果。
@@ -192,6 +192,8 @@ npm run switch-tab -- <tabId>
 
 ## 验证
 
-`npm test` 构建代码并运行回环桥接、MCP stdio 和模拟 SSH 测试，不连接真实浏览器或服务器。实际启用仍需确认服务器转发策略和浏览器连接。
+`npm test` 构建代码并运行回环桥接、MCP stdio、模拟 SSH 和页面大纲渲染测试，不连接真实浏览器或服务器。
+
+`npm run test:e2e` 在 Playwright 下载的 Chromium 里加载扩展，经真实 daemon 验证 observe、act 和上传；首次运行前执行 `npx playwright-core install chromium`。实际启用仍需确认服务器转发策略和浏览器连接。
 
 更多设计说明见 `docs/`。

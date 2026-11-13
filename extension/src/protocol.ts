@@ -105,16 +105,44 @@ export interface ReadablePage {
   text: string;
 }
 
-export interface AgentHtmlSnapshot {
+export interface PageSnapshot {
   snapshotId: string;
-  format: "agent-html";
-  html: string;
+  format: "braiser-aria";
+  text: string;
   meta: {
     elementCount: number;
+    frameCount: number;
     truncated: boolean;
-    debug?: Record<string, unknown>;
   };
 }
+
+export interface ContentObserveInput {
+  snapshotId: string;
+  idPrefix: string;
+}
+
+export interface FrameSnapshotResult {
+  text: string;
+  elementCount: number;
+}
+
+export interface ContentInventory {
+  items: string[];
+  hasSnapshot: boolean;
+}
+
+export interface ContentActResult {
+  ok: boolean;
+  error?: string;
+  message?: string;
+}
+
+export type ContentRequest =
+  | { type: "browser.frame_id"; payload: { frameId: number } }
+  | { type: "page.extract_readable_text"; payload?: undefined }
+  | { type: "browser.observe"; payload: ContentObserveInput }
+  | { type: "browser.inventory"; payload: { snapshotId?: string } }
+  | { type: "browser.act"; payload: BrowserActInput };
 
 export type BrowserActAction =
   | "click"
@@ -134,11 +162,26 @@ export interface BrowserActInput {
   checked?: boolean;
 }
 
+// D-0014: only success and coarse changes, no page text.
+export interface BrowserActChanges {
+  navigated?: true;
+  url?: string;
+  title?: string;
+  newTabs?: Array<{ tabId: number; url: string }>;
+  downloads?: string[];
+  added?: string[];
+  removed?: string[];
+  addedCount?: number;
+  removedCount?: number;
+}
+
 export interface BrowserActResult {
   ok: boolean;
-  message?: string;
   error?: string;
-  shouldObserveAgain: boolean;
+  message?: string;
+  /** Whether element ids from this snapshot can still be used. */
+  snapshotValid: boolean;
+  changes?: BrowserActChanges;
 }
 
 export interface DebugInjectJsInput {

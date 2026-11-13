@@ -155,14 +155,14 @@ export interface CleanPage {
   text: string;
 }
 
-export interface AgentHtmlSnapshot {
+export interface PageSnapshot {
   snapshotId: string;
-  format: "agent-html";
-  html: string;
+  format: "braiser-aria";
+  text: string;
   meta: {
     elementCount: number;
+    frameCount: number;
     truncated: boolean;
-    debug?: Record<string, unknown>;
   };
 }
 
@@ -184,11 +184,25 @@ export interface BrowserActInput {
   checked?: boolean;
 }
 
+// D-0014: only success and coarse changes, no page text.
+export interface BrowserActChanges {
+  navigated?: true;
+  url?: string;
+  title?: string;
+  newTabs?: Array<{ tabId: number; url: string }>;
+  downloads?: string[];
+  added?: string[];
+  removed?: string[];
+  addedCount?: number;
+  removedCount?: number;
+}
+
 export interface BrowserActResult {
   ok: boolean;
-  message?: string;
   error?: string;
-  shouldObserveAgain: boolean;
+  message?: string;
+  snapshotValid: boolean;
+  changes?: BrowserActChanges;
 }
 
 export interface DebugInjectJsInput {

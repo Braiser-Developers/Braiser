@@ -1,6 +1,6 @@
 # D-0001 保留既有浏览器桥接与 Observe/Act 架构
 
-- 状态：有效
+- 状态：部分被取代（→ [D-0016](0016-observe-output-format.md)）：observe 的页面表示（agent-html）和 CDP 可点击补充
 - 日期：2026-11-12
 - 决策者：agent
 - 服务于：[作者预期](../overview.md)

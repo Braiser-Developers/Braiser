@@ -33,7 +33,8 @@ const fileName = `${dateStamp()}-${slugify(pageName)}.md`;
 - `storage.ts`：本地保存。
 - `background.ts`：扩展侧浏览器 API 执行层。
 - `debug.ts`：扩展侧 debug bridge，负责持有和 daemon 的 WebSocket 长连接。
-- `content.ts`：页面内信息抽取和受控动作执行。
+- `content.ts`：页面内信息抽取和受控动作执行；页面识别交给 `vendor/playwright`，输出格式在 `observe/render.ts`。
+- `vendor/playwright/` 只通过 `npm run vendor:playwright` 更新，不手工修改；需要不同行为时在 `observe/` 里处理。
 
 `debug.inject_js`、`debug.cdp_command` 这类高权限调试能力必须保持 debug-only 命名、描述和文档边界，避免和 `browser.act` 的受控动作集合混在一起。
 
