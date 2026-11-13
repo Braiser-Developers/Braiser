@@ -45,7 +45,7 @@ export async function buildFrameSnapshot(idPrefix: string): Promise<FrameSnapsho
         token: frameId === undefined ? undefined : frameTokenFor(frameId)
       };
     }
-  }, { pageUrl: location.href });
+  }, { pageUrl: location.href, aliasPagePath: window.top === window });
 
   // Upload targets are often hidden behind a styled button; keep them reachable.
   const known = new Set(registry.values());

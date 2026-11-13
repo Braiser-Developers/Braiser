@@ -84,3 +84,4 @@
 | [D-0014](0014-lean-action-result.md) | 动作后只返回成败和大的变化 | 有效 |
 | [D-0015](0015-extension-bundling-and-e2e.md) | 用 esbuild 打包扩展，用 Playwright 驱动的 Chromium 做端到端测试 | 有效 |
 | [D-0016](0016-observe-output-format.md) | observe 的输出格式与 iframe 拼接 | 有效 |
+| [D-0017](0017-lossless-snapshot-compaction.md) | 不丢可见信息的快照压缩 | 有效 |

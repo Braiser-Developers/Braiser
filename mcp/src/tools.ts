@@ -162,7 +162,7 @@ export const tools: Tool[] = [
   },
   {
     name: "browser.observe",
-    description: "Observe the current agent focus tab in the Braised tab group. Returns the whole page as an indented accessibility outline in the text field: roles, accessible names, all text, current form values and states such as [checked] or [expanded], including shadow DOM and iframes. Actionable elements carry ids such as [E12] (F1E3 inside an iframe); prose is written inline as [link text](E12 /url). Use these ids with browser.act.",
+    description: "Observe the current agent focus tab in the Braised tab group. Returns the whole page as an indented accessibility outline in the text field: roles, accessible names, all text, current form values and states such as [checked] or [expanded], including shadow DOM and iframes. Actionable elements carry ids such as [E12] (F1E3 inside an iframe); prose is written inline as [link text](E12 /url) and simple table rows as cells separated by |. URL shorthand: same-site URLs show only the path, ~ stands for the path given in the 'url alias' line, and =E12 means the same URL as element E12 (as a URL suffix it stands for that element's URL). Use these ids with browser.act.",
     inputSchema: {
       type: "object",
       properties: {},

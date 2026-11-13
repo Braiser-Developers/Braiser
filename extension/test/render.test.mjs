@@ -39,8 +39,7 @@ test('keeps text, structure, states and form values; ids only on actionable elem
   ]);
   const text = render.renderAriaTree(tree, hooks(), { pageUrl: 'https://example.com/settings' });
   assert.equal(text, [
-    '- navigation "Site":',
-    '  - link "Home" [E1] → /',
+    '- navigation "Site": [Home](E1 /)',
     '- heading "Create token" [level=1]',
     '- generic:',
     '  - textbox "Token name" [E2] placeholder="Name": my token',
@@ -80,8 +79,7 @@ test('phrasing wrappers such as superscript citations stay inline', () => {
   assert.equal(text, [
     '- paragraph: Markdown [[9]](E1 #cite-9) is a [lightweight markup language](E2 /wiki/LML) for text.',
     '- list:',
-    '  - listitem:',
-    '    - link "Item" [E3]'
+    '  - listitem: [Item](E3)'
   ].join('\n'));
 });
 
@@ -115,4 +113,38 @@ test('frame token pattern keeps indentation for stitching', () => {
   const text = `- main:\n  - iframe:\n    ${render.frameTokenFor(3)}`;
   const found = [...text.matchAll(render.FRAME_TOKEN_PATTERN)].map(match => [match[1], match[2]]);
   assert.deepEqual(found, [['    ', '3']]);
+});
+
+test('D-0017 compactions keep visible information: metadata, page alias, repeated URLs, table rows', () => {
+  const page = 'https://github.com/microsoft/playwright-mcp';
+  const commit = 'https://github.com/microsoft/playwright-mcp/commit/431d3d65d720c43ff8b60f9cac2147a85c4e6598';
+  const cite = node('generic', '', [
+    node('link', 'The Markdown File Extension', [], { pointer: true, props: { url: 'https://daringfireball.net/linked/2014/markdown' } }),
+    'Retrieved 2022.',
+    node('link', 'Archived', [], { pointer: true, props: { url: 'https://web.archive.org/web/20200712/https://daringfireball.net/linked/2014/markdown' } }),
+    node('generic', 'ctx_ver=Z39.88-2004&rft.btitle=The+Markdown+File+Extension', [], { noRef: true, box: { visible: false, inline: true } })
+  ], { noRef: true });
+  const table = node('table', 'Files', [
+    node('rowgroup', '', [node('row', 'Name Message', [node('columnheader', 'Name', [], { noRef: true }), node('columnheader', 'Message', [], { noRef: true })], { noRef: true })], { noRef: true }),
+    node('rowgroup', '', [node('row', '', [
+      node('cell', '', [node('link', 'src', [], { pointer: true, props: { url: `${page}/tree/main/src` } })], { noRef: true }),
+      node('cell', '', [
+        node('link', 'fix a|b (', [], { pointer: true, props: { url: commit } }),
+        node('link', ')', [], { pointer: true, props: { url: commit } })
+      ], { noRef: true })
+    ], { noRef: true })], { noRef: true })
+  ], { noRef: true });
+  const tree = root([cite, table]);
+  const text = render.renderAriaTree(tree, hooks(), { pageUrl: page, aliasPagePath: true });
+  assert.equal(text, [
+    '- url alias: ~ = /microsoft/playwright-mcp',
+    '- generic: [The Markdown File Extension](E1 https://daringfireball.net/linked/2014/markdown) Retrieved 2022. [Archived](E2 https://web.archive.org/web/20200712/=E1)',
+    '- table "Files":',
+    '  - row [header]: Name | Message',
+    '  - row: [src](E3 ~/tree/main/src) | [fix a\\|b (](E4 ~/commit/431d3d65d720c43ff8b60f9cac2147a85c4e6598) [)](E5 =E4)'
+  ].join('\n'));
+
+  const plain = render.renderAriaTree(tree, hooks(), { pageUrl: page, disable: { metadata: true, alias: true, dedupe: true, rows: true, wrappers: true } });
+  assert.ok(plain.includes('ctx_ver=Z39.88-2004'), 'metadata is only dropped by the compaction');
+  assert.ok(plain.includes('- rowgroup:'));
 });

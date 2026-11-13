@@ -1,6 +1,6 @@
 # 页面观察、操作与正文读取
 
-设计依据：[D-0013](../user-spec/decisions/0013-playwright-recognition-layer.md)（识别照搬 Playwright）、[D-0016](../user-spec/decisions/0016-observe-output-format.md)（输出格式与 iframe）、[D-0014](../user-spec/decisions/0014-lean-action-result.md)（动作结果）。改动 [snapshot.ts](../extension/src/observe/snapshot.ts)、[render.ts](../extension/src/observe/render.ts) 或 [frames.ts](../extension/src/observe/frames.ts) 时，同步更新本文。
+设计依据：[D-0013](../user-spec/decisions/0013-playwright-recognition-layer.md)（识别照搬 Playwright）、[D-0016](../user-spec/decisions/0016-observe-output-format.md)（输出格式与 iframe）、[D-0017](../user-spec/decisions/0017-lossless-snapshot-compaction.md)（无损压缩）、[D-0014](../user-spec/decisions/0014-lean-action-result.md)（动作结果）。改动 [snapshot.ts](../extension/src/observe/snapshot.ts)、[render.ts](../extension/src/observe/render.ts) 或 [frames.ts](../extension/src/observe/frames.ts) 时，同步更新本文。
 
 ## 链路
 
@@ -22,6 +22,7 @@
 
 ```text
 - page "API Tokens" → https://example.com/settings/tokens
+- url alias: ~ = /settings/tokens
 - main:
   - heading "Create API token" [level=1]
   - paragraph: Tokens expire after [30 days](E3 /docs/expiry) by default.
@@ -31,16 +32,20 @@
     - option "7 days"
     - option "30 days" [selected]
   - button "Create token" [E7]
+  - table "Existing tokens":
+    - row [header]: Name | Created | Actions
+    - row: ci-bot | 2026-10-01 | [Revoke](E8 button) [Details](E9 ~/1)
   - iframe "Captcha":
     - button "I'm not a robot" [F1E1]
 - hidden file inputs:
-  - file input [E8] accept=".pem"
+  - file input [E10] accept=".pem"
 ```
 
 - 编号只给可操作元素：交互角色，以及最外层带指针光标的元素。iframe 内编号带 `F1` 这样的前缀。
 - 文字全部保留；含文字的段落写成一行，行内链接为 `[文字](编号 网址)`，非链接的可操作元素在编号后注明角色。
 - 网址总在行尾。同源网址只写路径，本页锚点只写 `#锚点`；非 ASCII 字符的转义显示成原字符，保留字符、空白和控制字符保持转义（无损）。
 - 只重复链接、按钮名称的内部文字不再展开。
+- 无损压缩（D-0017）：没有尺寸、只靠 title 得到名称的 generic 节点（如维基的 COinS 引用元数据）不输出；主 frame 里以本页路径开头的网址写成 `~/...`；16 字符以上的网址重复出现时写成 `=E12`，以前面网址结尾的网址把结尾写成 `=E12`；简单表格行写成 `a | b | c`，rowgroup 不单独占行；只包一个行内子元素的节点写成一行。
 - 整份快照超过 30 万字符时截断，`meta.truncated` 为 true。
 
 ## browser.act
@@ -83,7 +88,7 @@
 - 浏览器原生对话框（alert、confirm）会阻塞页面，动作结果无法报告。
 - 跨源 iframe 里的文件输入框无法上传。
 - 正文读取不包含 iframe 和 shadow DOM 内容，也不经过 CSS 计算（推断，未实测）。
-- 体积：2026-11-13 在测试 Chromium 中，英文维基约 24.0k token、中文维基约 16.9k、GitHub 仓库页约 12.9k（o200k 分词器）；其中网址约占 25%–30%，正文文字占得最多。见 [2026-11-13 浏览器快照 token 实测](../references/browser-snapshot-tokens-2026-11-13.md)。
+- 体积：2026-11-13 在测试 Chromium 中，英文维基约 14.8k token、中文维基约 11.0k、GitHub 仓库页约 9.5k（o200k 分词器）。维基剩下的大头是参考文献的可见正文，GitHub 是 README 和文件列表。见 [2026-11-13 浏览器快照 token 实测](../references/browser-snapshot-tokens-2026-11-13.md)。
 
 ## 测试
 

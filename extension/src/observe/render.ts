@@ -18,7 +18,14 @@ export interface RenderHooks {
 export interface RenderOptions {
   /** Same-origin link URLs are shortened to path, query and hash. */
   pageUrl?: string;
+  /** Write links under the page's own path as "~/..." (top frame only, D-0017). */
+  aliasPagePath?: boolean;
+  /** Turn individual compactions off, for measurements and tests. */
+  disable?: Partial<Record<Compaction, boolean>>;
 }
+
+/** D-0017: ways of saving tokens without dropping what a person sees on the page. */
+export type Compaction = "metadata" | "alias" | "dedupe" | "rows" | "wrappers";
 
 export function frameTokenFor(frameId: number): string {
   return `{{braiser-frame:${frameId}}}`;
@@ -133,9 +140,33 @@ function containsActionable(node: AriaNode, insidePointerTarget: boolean): boole
 }
 
 // Prose such as a paragraph with links is rendered on one line: text [link text](E3 /url).
-function canInline(node: AriaNode, childrenInsidePointerTarget: boolean): boolean {
+// A wrapper around a single inline child, such as <li><a>, is written on one line as well.
+function canInline(node: AriaNode, childrenInsidePointerTarget: boolean, ctx: Context): boolean {
   const hasText = node.children.some(child => typeof child === "string" && child.trim());
-  return hasText && node.children.every(child => typeof child === "string" || isInlineChild(child, childrenInsidePointerTarget));
+  const singleChild = !ctx.disable.wrappers && node.children.length === 1 && typeof node.children[0] !== "string";
+  return (hasText || singleChild) && node.children.every(child => typeof child === "string" || isInlineChild(child, childrenInsidePointerTarget));
+}
+
+const CELL_ROLES = new Set(["cell", "gridcell", "columnheader", "rowheader"]);
+
+// A table row whose cells are all short inline content is written as "a | b | c".
+function canRenderRowInline(node: AriaNode, childrenInsidePointerTarget: boolean, ctx: Context): boolean {
+  if (ctx.disable.rows || node.role !== "row" || !node.children.length) return false;
+  return node.children.every(cell => typeof cell !== "string" && CELL_ROLES.has(cell.role) && !hasStates(cell) &&
+    !isActionable(cell, childrenInsidePointerTarget) &&
+    cell.children.every(child => typeof child === "string" || isInlineChild(child, startsPointerTarget(cell, childrenInsidePointerTarget))));
+}
+
+// D-0017: zero-size nodes that only carry a title, such as Wikipedia's COinS citation metadata.
+// Nobody can see or hover them, and their content repeats the visible citation.
+function isInvisibleMetadata(node: AriaNode): boolean {
+  return node.role === "generic" && node.box?.visible === false && !node.ref &&
+    node.children.every(child => typeof child === "string" && !child.trim());
+}
+
+function visibleChildren(node: AriaNode, ctx: Context): (AriaNode | string)[] {
+  if (ctx.disable.metadata) return node.children;
+  return node.children.filter(child => typeof child === "string" || !isInvisibleMetadata(child));
 }
 
 // Inline parts lost their original spacing; avoid " ," and "( x" artifacts when joining them.
@@ -164,20 +195,58 @@ function repeatsName(node: AriaNode, childrenInsidePointerTarget: boolean): bool
 interface Context {
   hooks: RenderHooks;
   options: RenderOptions;
+  disable: Partial<Record<Compaction, boolean>>;
   lines: string[];
+  pagePath?: string;
+  aliasUsed: boolean;
+  urlOwners: Map<string, string>;
+}
+
+// D-0017: "~" stands for the page's own path; a long URL already shown is written as "=E12".
+function formatUrl(raw: string, ownerId: string | undefined, ctx: Context): string {
+  let url = shortUrl(raw, ctx.options.pageUrl);
+  const base = ctx.pagePath;
+  if (base && (url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`))) {
+    url = `~${url.slice(base.length)}`;
+    ctx.aliasUsed = true;
+  }
+  if (!ctx.disable.dedupe && url.length >= 16) {
+    const owner = ctx.urlOwners.get(url);
+    if (owner && owner !== ownerId) return `=${owner}`;
+    // Wrappers such as web.archive.org/web/<time>/<original> end with a URL shown earlier.
+    let shortened = url;
+    for (const [earlier, earlierOwner] of ctx.urlOwners) {
+      if (earlier.length >= 24 && url.length > earlier.length && url.endsWith(earlier)) {
+        shortened = `${url.slice(0, url.length - earlier.length)}=${earlierOwner}`;
+        break;
+      }
+    }
+    if (ownerId && !owner) ctx.urlOwners.set(url, ownerId);
+    return shortened;
+  }
+  return url;
 }
 
 function renderInlineChild(child: AriaNode, insidePointerTarget: boolean, ctx: Context): string {
   if (isActionable(child, insidePointerTarget)) {
     const id = ctx.hooks.elementId(child);
-    const url = child.props.url !== undefined ? ` ${shortUrl(child.props.url, ctx.options.pageUrl)}` : "";
+    const url = child.props.url !== undefined ? ` ${formatUrl(child.props.url, id, ctx)}` : "";
     const role = child.role === "link" ? "" : ` ${child.role}`;
     return `[${nodeText(child)}](${id}${role}${url})`;
   }
   if (child.role === "img") return child.name ? `[img ${quote(child.name)}]` : "";
   if (isLeaf(child)) return child.name || leafText(child);
   const inner = startsPointerTarget(child, insidePointerTarget);
-  return joinInline(child.children.map(grandchild => typeof grandchild === "string" ? grandchild : renderInlineChild(grandchild, inner, ctx)));
+  return joinInline(visibleChildren(child, ctx).map(grandchild => typeof grandchild === "string" ? grandchild : renderInlineChild(grandchild, inner, ctx)));
+}
+
+function renderCell(cell: AriaNode, insidePointerTarget: boolean, ctx: Context): string {
+  const inner = startsPointerTarget(cell, insidePointerTarget);
+  const children = visibleChildren(cell, ctx).filter(child => typeof child !== "string" || child.trim());
+  const text = children.length && !repeatsName(cell, inner)
+    ? joinInline(children.map(child => typeof child === "string" ? child : renderInlineChild(child, inner, ctx)))
+    : cell.name;
+  return text.replace(/\s+/g, " ").replace(/\|/g, "\\|");
 }
 
 function renderNode(node: AriaNode, depth: number, insidePointerTarget: boolean, ctx: Context): void {
@@ -191,15 +260,30 @@ function renderNode(node: AriaNode, depth: number, insidePointerTarget: boolean,
 
   const actionable = isActionable(node, insidePointerTarget);
   const childPointer = startsPointerTarget(node, insidePointerTarget);
+  // Row groups only separate header and body rows, which the rows themselves already show.
+  if (node.role === "rowgroup" && !actionable && !node.name && !ctx.disable.rows) {
+    for (const child of visibleChildren(node, ctx)) {
+      if (typeof child === "string") { if (child.trim()) ctx.lines.push(`${indent}- text: ${child}`); }
+      else renderNode(child, depth, childPointer, ctx);
+    }
+    return;
+  }
+  const id = actionable ? ctx.hooks.elementId(node) : undefined;
+  if (canRenderRowInline(node, childPointer, ctx)) {
+    const cells = node.children as AriaNode[];
+    const header = cells.every(cell => cell.role === "columnheader") ? " [header]" : "";
+    ctx.lines.push(`${indent}- row${header}${states(node)}${id ? ` [${id}]` : ""}: ${cells.map(cell => renderCell(cell, childPointer, ctx)).join(" | ")}`);
+    return;
+  }
   let header = `${indent}- ${node.role}`;
   if (node.name) header += ` ${quote(node.name)}`;
   header += states(node);
-  if (actionable) header += ` [${ctx.hooks.elementId(node)}]`;
+  if (id) header += ` [${id}]`;
   if (node.props.placeholder !== undefined) header += ` placeholder=${quote(node.props.placeholder)}`;
   // The URL always ends the line so that a following ":" or text cannot be read as part of it.
-  const url = node.props.url !== undefined ? ` → ${shortUrl(node.props.url, ctx.options.pageUrl)}` : "";
+  const url = node.props.url !== undefined ? ` → ${formatUrl(node.props.url, id, ctx)}` : "";
 
-  const children = repeatsName(node, childPointer) ? [] : node.children.filter(child => typeof child !== "string" || child.trim());
+  const children = repeatsName(node, childPointer) ? [] : visibleChildren(node, ctx).filter(child => typeof child !== "string" || child.trim());
   if (children.length === 0) {
     ctx.lines.push(`${header}${url}`);
     return;
@@ -208,7 +292,7 @@ function renderNode(node: AriaNode, depth: number, insidePointerTarget: boolean,
     ctx.lines.push(`${header}: ${children[0]}${url}`);
     return;
   }
-  if (canInline(node, childPointer)) {
+  if (canInline({ ...node, children }, childPointer, ctx)) {
     const parts = children.map(child => typeof child === "string" ? child : renderInlineChild(child, childPointer, ctx));
     ctx.lines.push(`${header}: ${joinInline(parts).replace(/\s+/g, " ")}${url}`);
     return;
@@ -222,14 +306,25 @@ function renderNode(node: AriaNode, depth: number, insidePointerTarget: boolean,
 
 /** Renders the children of the aria tree root (a "fragment"). */
 export function renderAriaTree(root: AriaNode, hooks: RenderHooks, options: RenderOptions = {}): string {
-  const ctx: Context = { hooks, options, lines: [] };
-  for (const child of root.children) {
+  const disable = options.disable ?? {};
+  let pagePath: string | undefined;
+  if (options.aliasPagePath && !disable.alias && options.pageUrl) {
+    try {
+      const path = shortUrl(new URL(options.pageUrl).pathname, options.pageUrl).replace(/\/$/, "");
+      if (path.length > 1) pagePath = path;
+    } catch {
+      // Unparseable page URLs simply get no alias.
+    }
+  }
+  const ctx: Context = { hooks, options, disable, lines: [], pagePath, aliasUsed: false, urlOwners: new Map() };
+  for (const child of visibleChildren(root, ctx)) {
     if (typeof child === "string") {
       if (child.trim()) ctx.lines.push(`- text: ${child}`);
     } else {
       renderNode(child, 0, false, ctx);
     }
   }
+  if (ctx.aliasUsed) ctx.lines.unshift(`- url alias: ~ = ${pagePath}`);
   return ctx.lines.join("\n");
 }
 
