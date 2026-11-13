@@ -2,7 +2,7 @@
 
 最近核对：2026-11-13。
 
-来源：在作者本机 Chrome 的 Braised 标签组里新开后台标签页，通过本机 Braiser MCP 调用 `browser.observe` 和 `page.extract_readable_text`；测完关闭标签页，焦点切回原页面。被测代码为提交 `7e14290` 的扩展。
+来源：在作者本机 Chrome 的 Braised 标签组里新开后台标签页，通过本机 Braiser MCP 调用 `browser.observe` 和 `page.extract_readable_text`；测完关闭标签页，焦点切回原页面。被测代码为提交 `831a60a`（改写历史前编号 `7e14290`） 的扩展。
 
 ## 自制测试页
 

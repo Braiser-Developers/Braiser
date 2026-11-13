@@ -5,7 +5,7 @@
 ## 方法
 
 - 同一天抓取三个页面：英文维基百科 Markdown 条目、中文维基百科 Markdown 条目、GitHub 仓库页 `microsoft/playwright-mcp`。
-- Braiser：作者本机 Chrome 的 Braised 标签组里新开后台标签页，调用 `browser.observe` 和 `page.extract_readable_text`（扩展代码同提交 `7e14290`）。
+- Braiser：作者本机 Chrome 的 Braised 标签组里新开后台标签页，调用 `browser.observe` 和 `page.extract_readable_text`（扩展代码同提交 `831a60a`（改写历史前编号 `7e14290`））。
 - Playwright MCP v0.0.85、Chrome DevTools MCP v1.13.0：用 MCP SDK 客户端以 stdio 启动，headless 的本机 Chrome，独立配置，视口 1280×800；导航后等 2 秒再取快照。两者看到的是未登录页面，Braiser 用的是作者的 Chrome（维基和 GitHub 公共页面，未登录差异推断很小）。
 - token 用 tiktoken 的 `o200k_base` 分词器计算，近似 OpenAI 新模型。Claude 的分词器不同，数字会有出入，但不同工具之间的相对大小可参考。
 
