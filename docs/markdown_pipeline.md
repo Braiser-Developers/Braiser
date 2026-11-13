@@ -9,7 +9,7 @@ Markdown conversion 使用项目本地 Python 虚拟环境 `.venv-markdown/`。�
 `npm install` 会自动创建该环境并安装依赖；如果 Python 3.10 或更高版本不可用，安装会直接失败，
 避免留下只能运行部分功能的项目。手动修复或重建环境时可运行：
 
-```powershell
+```bash
 npm run setup:markdown
 ```
 
@@ -32,9 +32,11 @@ BeautifulSoup，但 Braiser 自己的 HTML normalization 脚本直接 import `bs
 
 可执行接口：
 
-```powershell
-python scripts/preprocess-markdown-html.py input.html output.html
+```bash
+.venv-markdown/bin/python scripts/preprocess-markdown-html.py input.html output.html
 ```
+
+Windows 上的解释器路径是 `.venv-markdown\Scripts\python.exe`。
 
 输入：
 
@@ -93,8 +95,8 @@ Inline math 规则：
 
 可执行接口：
 
-```powershell
-python scripts/markitdown-braiser.py input.html output.md
+```bash
+.venv-markdown/bin/python scripts/markitdown-braiser.py input.html output.md
 ```
 
 输入：

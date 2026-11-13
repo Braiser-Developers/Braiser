@@ -35,3 +35,4 @@
 | OpenSSH | [手册事实与待核实项](OpenSSH.md) | — |
 | 2026-11-12 远程部署实测 | [环境、验证结果与边界](deployment-2026-11-12.md) | — |
 | 2026-11-13 本机 MCP 客户端接入 | [Codex 与 OpenCode 配置及实测](local-client-integration-2026-11-13.md) | — |
+| 2026-11-13 observe 实测 | [自制测试页与维基百科页面的输出](observe-measurement-2026-11-13.md) | — |

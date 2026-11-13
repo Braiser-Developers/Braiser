@@ -20,7 +20,7 @@ Linux Agent → Linux MCP stdio → Linux 回环 27833 → 本机发起的 SSH �
 
 本机仍有原有上传、下载、页面保存和调试工具；远程只允许状态、标签管理、observe、act 和页面读取。列表过滤、MCP 调用校验、daemon 凭据身份限制共用同一允许集合，见 [D-0003](../user-spec/decisions/0003-credentials-and-tools.md)。这不是网页提交风险审批系统。
 
-页面观察继续生成 agent-html，动作以 snapshotId/elementId 定位。所有 MCP 会话共享一个焦点，首版按单 Agent 使用。正文读取在 MCP 主机运行原 Markdown 管线，见 [D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。
+页面观察继续生成 agent-html，动作以 snapshotId/elementId 定位，具体行为与局限见 [页面观察与操作](observe_act.md)。所有 MCP 会话共享一个焦点，首版按单 Agent 使用。正文读取在 MCP 主机运行原 Markdown 管线，见 [D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。
 
 ## 状态与失败
 

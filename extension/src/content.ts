@@ -271,7 +271,7 @@ function extractReadablePage(): ReadablePage {
 // Observe: DOM -> AgentNode tree -> simplified tree -> agent-html
 // ---------------------------------------------------------------------------
 
-// Keep docs/mvp_architecture.md browser.observe algorithm notes in sync when changing observe filtering or serialization.
+// Keep docs/observe_act.md in sync when changing observe filtering or serialization.
 function observePage(input: ObserveInput = {}): AgentHtmlSnapshot {
   pruneCdpBridgeRuns();
   const snapshotId = `S${state.nextSnapshotNumber++}`;

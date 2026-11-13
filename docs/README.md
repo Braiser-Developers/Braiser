@@ -10,6 +10,7 @@
 |---|---|
 | [远程访问](remote-access.md) | 启用步骤、凭据、配置、故障定位与验证边界 |
 | [当前 MVP 架构](mvp_architecture.md) | 本机/远程链路与能力边界 |
+| [页面观察与操作](observe_act.md) | observe、act、正文读取的当前行为与局限 |
 | [文件架构](file_architecture.md) | 模块职责 |
 | [Markdown 协议](markdown_pipeline.md) | 既有转换管线 |
 | [代码设计规范](code_design_guidelines.md) | 既有规范与新增职责 |

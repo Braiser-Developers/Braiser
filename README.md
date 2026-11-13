@@ -49,57 +49,52 @@ Chrome 扩展 debug bridge
 
 ## 安装依赖
 
-```powershell
+```bash
 npm install
 ```
 
-### Markdown conversion setup
+### Markdown 转换环境
 
-Markdown export uses Microsoft MarkItDown from a project-local Python virtual environment.
-`npm install` creates `.venv-markdown/` and installs the packages from
-`requirements-markdown.txt` automatically. Python 3.10 or newer must be available on the machine;
-otherwise `npm install` fails rather than leaving Markdown export partially configured.
+Markdown 转换使用项目本地 Python 虚拟环境里的 Microsoft MarkItDown。`npm install` 会自动创建 `.venv-markdown/`，并安装 `requirements-markdown.txt` 中的依赖。机器上必须有 Python 3.10 或更高版本，否则 `npm install` 直接失败，不会留下只配好一半的转换环境。
 
-To repair or recreate this environment manually, run:
+手动修复或重建这个环境：
 
-```powershell
+```bash
 npm run setup:markdown
 ```
-Braiser preprocesses KaTeX annotations into marked math nodes before handing the HTML to a
-project-local MarkItDown wrapper, so math text is preserved instead of being escaped as
-ordinary Markdown text.
 
-Markdown export can be run with:
+Braiser 先把 KaTeX 的 LaTeX 注释预处理成带标记的数学节点，再交给项目内的 MarkItDown 包装脚本，这样数学内容会原样保留，不会被当成普通 Markdown 文本转义。
 
-```powershell
+导出当前页面的 Markdown：
+
+```bash
 npm run download:markdown
 ```
 
-To inspect the preprocessed HTML before Markdown conversion, run:
+查看转换前预处理过的 HTML：
 
-```powershell
+```bash
 npm run download:preprocessed-html
 ```
 
-Observe output and runtime DOM can also be downloaded with:
+也可以导出 observe 输出和运行时 DOM：
 
-```powershell
+```bash
 npm run download:observe
 npm run download:dom
 ```
 
-The normalization and conversion contract is documented in
-`docs/markdown_pipeline.md`.
+预处理和转换的约定见 [Markdown 协议](docs/markdown_pipeline.md)。
 
 ## 构建
 
-```powershell
+```bash
 npm run build
 ```
 
 也可以分别构建：
 
-```powershell
+```bash
 npm run build:extension
 npm run build:mcp
 ```
@@ -120,19 +115,19 @@ TypeScript 源码位于 `extension/src/` 和 `mcp/src/`。构建产物输出到 
 
 在 Chrome 中准备一个标题为 `Braised` 的 tab group。Braiser 会维护一个 agent focus tab，所有观察和操作默认作用于这个 tab；初次使用或已保存的焦点失效时，会回退到该组最后一个 tab。也可以通过 MCP tab 工具创建、打开、切换或关闭 `Braised` 组内页面。
 
-通常只需要由 Codex 的 MCP 配置启动：
+通常只需要由 MCP 客户端以 stdio 方式启动 `mcp/dist/server.js`。Codex 的配置示例（路径按实际位置调整）：
 
 ```toml
 [mcp_servers.braiser]
-command = 'C:\Program Files\nodejs\node.exe'
-args = ['D:\Life\project\Braiser\Braiser\mcp\dist\server.js']
+command = "node"
+args = ["/path/to/Braiser/mcp/dist/server.js"]
 ```
 
-`mcp/dist/server.js` 会在启动时尝试连接本地 daemon；如果 daemon 不存在，会自动后台启动 `mcp/dist/daemon.js`。
+OpenCode 等其他 MCP 客户端也是用 stdio 启动同一个文件。`mcp/dist/server.js` 启动时会尝试连接本地 daemon；如果 daemon 不存在，会自动在后台启动 `mcp/dist/daemon.js`。
 
 也可以手动启动：
 
-```powershell
+```bash
 npm run daemon
 npm run mcp
 ```
@@ -144,11 +139,13 @@ ws://127.0.0.1:17832  Chrome 扩展 debug bridge -> braiser-daemon
 ws://127.0.0.1:17833  braiser-mcp -> braiser-daemon
 ```
 
+17833 要求 token；17832 只接受来自 Chrome 扩展页面的连接，网页无法冒充扩展。
+
 打开扩展 popup，点击“打开 Bridge”。Bridge 页面会连接 daemon，并在页面保持打开时维持 WebSocket 常驻。这样可以避免 MV3 background service worker 休眠导致连接断开。
 
 常用 CLI 辅助命令：
 
-```powershell
+```bash
 npm run tabs
 npm run switch-tab -- <tabId>
 ```
