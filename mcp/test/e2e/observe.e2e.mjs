@@ -64,7 +64,6 @@ async function setup(t) {
 
   // The extension hard-codes the bridge port; test against a copy pointed at this daemon.
   const dir = await mkdtemp(path.join(tmpdir(), 'braiser-e2e-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const extension = path.join(dir, 'extension');
   await cp(path.resolve('extension'), extension, { recursive: true, filter: source => !source.includes(`${path.sep}src`) && !source.includes(`${path.sep}test`) });
   for (const file of ['dist/debug.js', 'dist/background.js', 'manifest.json']) {
@@ -76,7 +75,8 @@ async function setup(t) {
     channel: 'chromium', headless: true,
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`]
   });
-  t.after(() => context.close());
+  // Chrome keeps writing to its profile until it exits, so remove the directory afterwards.
+  t.after(async () => { await context.close(); await rm(dir, { recursive: true, force: true }); });
   const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
   const bridgePage = await context.newPage();
   await bridgePage.goto(`chrome-extension://${new URL(worker.url()).host}/debug.html`);
