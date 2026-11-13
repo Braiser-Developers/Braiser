@@ -49,3 +49,4 @@ content script 返回 `document.documentElement.outerHTML`（运行时 DOM），
 - observe 不包含元素是否在视口内、页面滚动位置等信息；没有按距离滚动页面的动作。
 - 动作是合成事件，部分网站不响应；富文本编辑器（ProseMirror、Lexical 等）通常不认直接改写的 `textContent`。（推断，未实测）
 - 正文读取基于 outerHTML，不经过 CSS 计算：CSS 隐藏的内容也会出现，shadow DOM 和 iframe 内容不会出现。（推断，未实测）
+- 整页 observe 在大页面上很大：英文维基一页约 3 万 token，只比 Playwright MCP、Chrome DevTools MCP 的整页快照少约 20%；在 GitHub 仓库页上超过 30 秒超时，原因未查明。（实测，见 [2026-11-13 浏览器快照 token 实测](../references/browser-snapshot-tokens-2026-11-13.md)）

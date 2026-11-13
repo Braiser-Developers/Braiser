@@ -36,3 +36,11 @@
 | 2026-11-12 远程部署实测 | [环境、验证结果与边界](deployment-2026-11-12.md) | — |
 | 2026-11-13 本机 MCP 客户端接入 | [Codex 与 OpenCode 配置及实测](local-client-integration-2026-11-13.md) | — |
 | 2026-11-13 observe 实测 | [自制测试页与维基百科页面的输出](observe-measurement-2026-11-13.md) | — |
+| 2026-11-13 浏览器快照 token 实测 | [Braiser、Playwright MCP、Chrome DevTools MCP 对比](browser-snapshot-tokens-2026-11-13.md) | — |
+| Claude 的浏览器操作 | [Claude in Chrome、browser use tool、computer use](Claude-browser-tools.md) | — |
+| Codex 与 OpenAI 的浏览器操作 | [Codex 应用、CLI 与 API 工具](Codex-browser-tools.md) | — |
+| Playwright MCP | [快照格式、省 token 尝试与他人报告](Playwright-MCP.md) | — |
+| Chrome DevTools MCP | [快照格式与实测](Chrome-DevTools-MCP.md) | — |
+| agent-browser | [精简快照与 token 说法](agent-browser.md) | — |
+| browser-use | [页面表示方式](browser-use.md) | — |
+| Stagehand | [act/observe/extract](Stagehand.md) | — |
