@@ -88,3 +88,4 @@
 | [D-0018](0018-remote-tunnel-switch.md) | 远程隧道改为开关，由 daemon 维持 | 有效 |
 | [D-0019](0019-background-tab-new-group.md) | 修复新建 Braised 标签组时后台标签页跳到前台 | 有效 |
 | [D-0020](0020-background-tabs-by-default.md) | 标签页默认在后台打开 | 有效 |
+| [D-0021](0021-versioning.md) | 统一版本号，各部分报告构建号并提示未更新的部分 | 有效 |

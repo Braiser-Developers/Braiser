@@ -15,6 +15,7 @@ import { ensureDaemon } from '../dist/lifecycle.js';
 import { toolsForMode, callTool } from '../dist/tools.js';
 import { parseRemoteCommand, SshTunnel } from '../dist/ssh-tunnel.js';
 import { TunnelSupervisor, readRemoteSettings, writeRemoteSettings } from '../dist/tunnel-supervisor.js';
+import { versionWarnings } from '../dist/build-info.js';
 
 const localToken = 'L'.repeat(43), remoteToken = 'R'.repeat(43);
 const extensionOrigin = `chrome-extension://${'a'.repeat(32)}`;
@@ -28,14 +29,25 @@ async function fixture(t) {
   t.after(() => { local.close(); remote.close(); });
   const connectExtension = async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${daemon.ports.extension}`, { origin: extensionOrigin });
+    const firstMessage = once(ws, 'message');
     await once(ws, 'open');
     t.after(() => ws.terminate());
+    await answerInfo(ws, firstMessage);
     return ws;
   };
   return { daemon, url, local, remote, connectExtension };
 }
 
 function respond(ws, request, result) { ws.send(JSON.stringify({ id: request.id, ok: true, result })); }
+
+// D-0021: the daemon asks every newly connected extension for its version first.
+// Pass the promise from once(ws, 'message') created before 'open': the request can arrive right after it.
+async function answerInfo(ws, firstMessage, info = { version: '0.0.0-test', build: 'test' }) {
+  const [bytes] = await firstMessage;
+  const request = JSON.parse(bytes.toString());
+  assert.equal(request.type, 'extension.info');
+  respond(ws, request, info);
+}
 
 test('configuration fails closed and remote never invokes local lifecycle', async () => {
   const config = clientConfig({ BRAISER_MODE: 'remote', BRAISER_TOKEN: remoteToken });
@@ -67,7 +79,10 @@ test('authentication rejects missing/wrong tokens; status diagnoses extension st
     await assert.rejects(bridge.status(), /HTTP 401/);
     bridge.close();
   }
-  assert.deepEqual(await f.remote.status(), { daemon: 'ok', protocolVersion: 2, clientMode: 'remote', extensionConnected: false });
+  const { versions, ...remoteStatus } = await f.remote.status();
+  assert.deepEqual(remoteStatus, { daemon: 'ok', protocolVersion: 2, clientMode: 'remote', extensionConnected: false });
+  assert.equal(versions.extension, undefined);
+  assert.equal(typeof versions.daemon.build, 'string');
   await f.connectExtension();
   assert.equal((await f.local.status()).extensionConnected, true);
   await assert.rejects(ensureDaemon(f.remote, clientConfig({})), /local-token/);
@@ -165,7 +180,9 @@ test('reconnecting after daemon loss never replays an in-flight action', async t
   await replacement.ready;
   t.after(() => replacement.close());
   const newExtension = new WebSocket(`ws://127.0.0.1:${ports.extension}`, { origin: extensionOrigin });
+  const firstMessage = once(newExtension, 'message');
   await once(newExtension, 'open'); t.after(() => newExtension.terminate());
+  await answerInfo(newExtension, firstMessage);
   const seen = [];
   newExtension.on('message', bytes => {
     const request = JSON.parse(bytes.toString()); seen.push(request.type); respond(newExtension, request, 'reconnected');
@@ -313,4 +330,30 @@ test('only the local credential can see or switch the tunnel', async t => {
   assert.equal(reloads, 0);
   assert.deepEqual(await local.reloadTunnel(), { enabled: false, state: 'disabled' });
   assert.equal(reloads, 1);
+});
+
+test('status reports running builds and warns about parts that were rebuilt but not restarted', async t => {
+  const f = await fixture(t);
+  await f.connectExtension();
+  const { versions } = await f.local.status();
+  assert.deepEqual(versions.extension, { version: '0.0.0-test', build: 'test' });
+  assert.deepEqual(versionWarnings(versions, versions.daemon, versions.daemon, 'local', true).length, 1, 'only the test extension differs from disk');
+  assert.match(versionWarnings(versions, versions.daemon, versions.daemon, 'local', true)[0], /reload Braiser in chrome:\/\/extensions/);
+
+  const latest = { mcp: { version: '0.2.0', build: 'new' }, extension: { version: '0.2.0', build: 'ext' } };
+  const old = { version: '0.2.0', build: 'old' };
+  const report = { daemon: old, extension: { version: '0.2.0', build: 'ext' }, latest };
+  assert.deepEqual(versionWarnings(report, latest.mcp, latest.mcp, 'local', true).map(w => w.split(' (')[0]), ['The running daemon']);
+  assert.match(versionWarnings(report, old, latest.mcp, 'local', true)[1], /restart the agent session/);
+  assert.match(versionWarnings({ ...report, daemon: latest.mcp }, old, old, 'remote', true)[0], /sync and rebuild this copy/);
+  assert.match(versionWarnings({ ...report, extension: null }, latest.mcp, latest.mcp, 'local', true)[0], /too old/);
+  assert.match(versionWarnings(undefined, old, old, 'local', true)[0], /restart it/);
+});
+
+test('the version is edited in one place', async () => {
+  const read = async file => JSON.parse(await readFile(path.resolve(file), 'utf8')).version;
+  const version = await read('package.json');
+  assert.equal(await read('mcp/package.json'), version);
+  assert.equal(await read('extension/manifest.json'), version);
+  assert.equal(JSON.parse(await readFile(path.resolve('mcp/dist/build-info.json'), 'utf8')).version, version);
 });

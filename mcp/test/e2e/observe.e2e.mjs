@@ -111,6 +111,10 @@ const idOf = (text, pattern) => {
 
 test('observe shows current form state, shadow DOM, iframes and full text; act reports coarse changes', async t => {
   const { bridge, origin } = await setup(t);
+  // D-0021: the loaded extension reports the build that is on disk, so there is nothing to warn about.
+  const { versions } = await bridge.status();
+  assert.deepEqual(versions.extension, versions.latest.extension);
+
   let snapshot = await openAndObserve(bridge, `${origin}/form.html`, 'FRAME-42');
   let text = snapshot.text;
   t.diagnostic(`\n${text}`);

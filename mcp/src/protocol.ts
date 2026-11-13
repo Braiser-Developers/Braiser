@@ -15,7 +15,8 @@ export type ExtensionRequestType =
   | "browser.observe"
   | "browser.act"
   | "debug.inject_js"
-  | "debug.cdp_command";
+  | "debug.cdp_command"
+  | "extension.info";
 
 export interface ExtensionRequest {
   id: string;
@@ -66,6 +67,8 @@ export interface DaemonStatus {
   extensionConnected: boolean;
   /** Only reported to local clients (D-0018). */
   tunnel?: import("./tunnel-supervisor.js").TunnelStatus;
+  /** D-0021: running and newest builds; missing from daemons older than 0.2.0. */
+  versions?: import("./build-info.js").VersionReport;
 }
 
 export interface ActiveTabInfo {

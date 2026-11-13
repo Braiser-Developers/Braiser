@@ -5,6 +5,7 @@ import type { Mode } from "./config.js";
 import { toolAllowed } from "./policy.js";
 import type { DaemonRequest, DaemonResponse, ExtensionRequest, ExtensionResponse } from "./protocol.js";
 import type { TunnelStatus } from "./tunnel-supervisor.js";
+import { latestBuilds, RUNNING_BUILD, type BuildInfo } from "./build-info.js";
 
 const requestTypes = new Set([
   "browser.get_active_tab", "browser.list_tabs", "browser.create_tab", "browser.open_tab",
@@ -38,6 +39,9 @@ export class BraiserDaemon {
   private readonly pending = new Map<string, Pending>();
   readonly ready: Promise<void>;
   private readonly tunnel?: TunnelControl;
+  // D-0021: what the loaded extension reports about itself; null when it is too old to answer.
+  private extensionInfo: BuildInfo | null | undefined;
+  private readonly infoRequests = new Map<string, NodeJS.Timeout>();
 
   constructor(options: DaemonOptions) {
     this.tunnel = options.tunnel;
@@ -85,6 +89,8 @@ export class BraiserDaemon {
   }
 
   async close(): Promise<void> {
+    for (const timer of this.infoRequests.values()) clearTimeout(timer);
+    this.infoRequests.clear();
     this.rejectPending("Daemon stopped; operation outcome is unknown. Observe again before retrying.");
     for (const server of [this.extensionServer, this.clientServer]) {
       for (const socket of server.clients) socket.terminate();
@@ -97,6 +103,7 @@ export class BraiserDaemon {
     this.rejectPending("Chrome extension replaced; operation outcome is unknown. Observe again before retrying.");
     this.extension?.terminate();
     this.extension = socket;
+    this.extensionInfo = undefined;
     socket.on("error", () => socket.terminate());
     socket.on("message", data => {
       if (this.extension !== socket) return;
@@ -108,6 +115,15 @@ export class BraiserDaemon {
         socket.close(1003, "Invalid extension response");
         return;
       }
+      const infoTimer = this.infoRequests.get(response.id);
+      if (infoTimer) {
+        clearTimeout(infoTimer);
+        this.infoRequests.delete(response.id);
+        const info = response.result as Partial<BuildInfo> | undefined;
+        this.extensionInfo = response.ok && typeof info?.version === "string" && typeof info?.build === "string"
+          ? { version: info.version, build: info.build } : null;
+        return;
+      }
       const pending = this.pending.get(response.id);
       if (!pending) return;
       clearTimeout(pending.timer);
@@ -117,8 +133,20 @@ export class BraiserDaemon {
     socket.on("close", () => {
       if (this.extension !== socket) return;
       this.extension = null;
+      this.extensionInfo = undefined;
       this.rejectPending("Chrome extension disconnected; operation outcome is unknown. Observe again before retrying.");
     });
+    this.queryExtensionInfo(socket);
+  }
+
+  private queryExtensionInfo(socket: WebSocket): void {
+    const id = `info-${randomUUID()}`;
+    this.infoRequests.set(id, setTimeout(() => {
+      this.infoRequests.delete(id);
+      if (this.extension === socket && this.extensionInfo === undefined) this.extensionInfo = null;
+    }, 5000));
+    const request: ExtensionRequest = { id, type: "extension.info" };
+    socket.send(JSON.stringify(request), () => undefined);
   }
 
   private handleClient(socket: WebSocket, mode: Mode, raw: string): void {
@@ -135,6 +163,11 @@ export class BraiserDaemon {
       this.respond(socket, { id: request.id, ok: true, result: {
         daemon: "ok", protocolVersion: 2, clientMode: mode,
         extensionConnected: this.extension?.readyState === WebSocket.OPEN,
+        versions: {
+          daemon: RUNNING_BUILD,
+          extension: this.extension?.readyState === WebSocket.OPEN ? this.extensionInfo : undefined,
+          latest: latestBuilds()
+        },
         ...(mode === "local" && this.tunnel ? { tunnel: this.tunnel.status() } : {})
       } });
       return;

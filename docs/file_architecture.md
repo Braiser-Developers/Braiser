@@ -27,6 +27,7 @@
 | [daemon.ts](../mcp/src/daemon.ts) | daemon 进程入口，准备凭据、监听、启动隧道守护并处理退出 |
 | [daemon-server.ts](../mcp/src/daemon-server.ts) | 两个回环监听端口、客户端认证和身份、扩展来源校验、扩展请求路由 |
 | [remote.ts](../mcp/src/remote.ts) | `remote enable/disable/status` 命令：检查免交互登录、写开关设置、通知 daemon |
+| [build-info.ts](../mcp/src/build-info.ts) | 读取运行中和磁盘上的构建号，生成"哪部分需要重新加载或重启"的提示（D-0021） |
 | [tunnel-supervisor.ts](../mcp/src/tunnel-supervisor.ts) | 读写 `remote.json` 开关，按设置维持隧道并断线重连（D-0018） |
 | [ssh-tunnel.ts](../mcp/src/ssh-tunnel.ts) | 命令解析与参数校验、免交互登录检查、独立 OpenSSH master、转发确认和子进程清理 |
 | [cli.ts](../mcp/src/cli.ts) | 原调试/下载 CLI，复用连接配置和生命周期；远程禁止文件导出 |
@@ -57,7 +58,7 @@ Bridge 页面保持 WebSocket，避免 MV3 service worker 休眠中断长连接�
 
 [setup-markdown.mjs](../scripts/setup-markdown.mjs) 创建项目 Python 环境；[预处理脚本](../scripts/preprocess-markdown-html.py) 和 [MarkItDown 包装](../scripts/markitdown-braiser.py) 保留数学内容。依据见 [D-0009](../user-spec/decisions/0009-existing-markdown-pipeline.md)。
 
-[build-extension.mjs](../scripts/build-extension.mjs) 用 esbuild 打包扩展，[vendor-playwright.mjs](../scripts/vendor-playwright.mjs) 从固定版本复制 Playwright 代码，依据见 [D-0015](../user-spec/decisions/0015-extension-bundling-and-e2e.md)。
+[build-info.mjs](../scripts/build-info.mjs) 按源码算构建号并写入两个 dist 目录，[sync-version.mjs](../scripts/sync-version.mjs) 由 `npm version` 调用、把版本同步到 mcp 和扩展，依据见 [D-0021](../user-spec/decisions/0021-versioning.md)。[build-extension.mjs](../scripts/build-extension.mjs) 用 esbuild 打包扩展（并编译进构建号），[vendor-playwright.mjs](../scripts/vendor-playwright.mjs) 从固定版本复制 Playwright 代码，依据见 [D-0015](../user-spec/decisions/0015-extension-bundling-and-e2e.md)。
 
 [根 package.json](../package.json) 提供 build、mcp、daemon、remote、test、test:e2e、vendor:playwright 和原 CLI 命令。[mcp/package.json](../mcp/package.json) 保留原 bin 并增加 braiser 入口。构建输出到 extension/dist 与 mcp/dist，不跟踪产物，不直接编辑。
 

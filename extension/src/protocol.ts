@@ -13,7 +13,8 @@ export type ExtensionRequestType =
   | "browser.observe"
   | "browser.act"
   | "debug.inject_js"
-  | "debug.cdp_command";
+  | "debug.cdp_command"
+  | "extension.info";
 
 export interface ExtensionRequest {
   id: string;

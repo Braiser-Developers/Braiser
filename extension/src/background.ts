@@ -99,6 +99,9 @@ async function handleExtensionRequest(request: ExtensionRequest): Promise<unknow
       return injectDebugJs(request.payload as DebugInjectJsInput);
     case "debug.cdp_command":
       return sendDebugCdpCommand(request.payload as DebugCdpCommandInput);
+    case "extension.info":
+      // D-0021: compiled in, so a rebuilt but not yet reloaded extension still reports its old build.
+      return { version: __BRAISER_VERSION__, build: __BRAISER_BUILD__ };
     default:
       throw new Error(`Unsupported request type: ${(request as ExtensionRequest).type}`);
   }

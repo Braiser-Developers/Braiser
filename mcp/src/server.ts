@@ -10,6 +10,7 @@ import { callTool, toolsForMode } from "./tools.js";
 import { clientConfig } from "./config.js";
 import { clientToken } from "./auth.js";
 import { ensureDaemon } from "./lifecycle.js";
+import { RUNNING_BUILD } from "./build-info.js";
 
 const config = clientConfig();
 const bridge = new ExtensionBridge(config.url, await clientToken(config), config.requestTimeoutMs);
@@ -18,7 +19,7 @@ await ensureDaemon(bridge, config);
 const server = new Server(
   {
     name: "braiser-mcp",
-    version: "0.1.0"
+    version: RUNNING_BUILD.version
   },
   {
     capabilities: {

@@ -49,6 +49,10 @@ Chrome 扩展 debug bridge
 - npm
 - Google Chrome，或支持 Manifest V3 的 Chromium 浏览器
 
+## 版本
+
+版本号只在根目录 `package.json` 里改，用 `npm version 0.3.0`（或 `minor`、`patch`）升级，会自动同步到 `mcp/package.json` 和扩展的 `manifest.json`，并提交、打标签。每次构建还会按源码算出一个构建号。`braiser.status` 报告各部分正在运行的版本和构建号；扩展重新构建了但没在 `chrome://extensions` 重新加载、daemon 是旧进程、会话的 MCP 是旧进程，或服务器副本和浏览器主机不一致时，会在 `warnings` 里给出提示。做法见 [D-0021](user-spec/decisions/0021-versioning.md)。
+
 ## 安装依赖
 
 ```bash

@@ -29,11 +29,12 @@ import type {
 } from "./protocol.js";
 import { readablePageToMarkdown } from "./markdown.js";
 import { savePage } from "./storage.js";
+import { latestBuilds, RUNNING_BUILD, versionWarnings } from "./build-info.js";
 
 export const tools: Tool[] = [
   {
     name: "braiser.status",
-    description: "Check whether the Braiser MCP process and Chrome extension are connected.",
+    description: "Check whether the Braiser MCP process, daemon and Chrome extension are connected, and which versions are running. A warnings field lists parts that run an older build than the code on disk (for example an extension that was rebuilt but not reloaded) and what to do about it.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -309,11 +310,13 @@ export async function callTool(
   if (!toolAllowed(name, mode)) throw new Error(`Tool unavailable in remote mode: ${name}`);
   switch (name) {
     case "braiser.status": {
+      const version = `${RUNNING_BUILD.version}+${RUNNING_BUILD.build}`;
       try {
         const status = await bridge.status();
-        return { mcp: "ok", mode, endpoint: bridge.url, daemonConnected: true, ...status };
+        const warnings = versionWarnings(status.versions, RUNNING_BUILD, latestBuilds().mcp, mode, status.extensionConnected);
+        return { mcp: "ok", version, mode, endpoint: bridge.url, daemonConnected: true, ...status, ...(warnings.length ? { warnings } : {}) };
       } catch (error) {
-        return { mcp: "ok", mode, endpoint: bridge.url, daemonConnected: false, extensionConnected: false,
+        return { mcp: "ok", version, mode, endpoint: bridge.url, daemonConnected: false, extensionConnected: false,
           error: error instanceof Error ? error.message : String(error) };
       }
     }

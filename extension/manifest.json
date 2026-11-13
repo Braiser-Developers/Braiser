@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Braiser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "让 Agent 通过 MCP 操作浏览器的轻量级工具。",
   "permissions": ["activeTab", "debugger", "downloads", "scripting", "storage", "tabGroups", "tabs"],
   "host_permissions": [

@@ -1,6 +1,6 @@
 {
   "name": "braiser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,8 @@
     "build": "npm run build:extension && npm run build:mcp",
     "build:extension": "tsc -p extension/tsconfig.json --noEmit && node scripts/build-extension.mjs",
     "vendor:playwright": "node scripts/vendor-playwright.mjs",
-    "build:mcp": "tsc -p mcp/tsconfig.json",
+    "build:mcp": "tsc -p mcp/tsconfig.json && node scripts/build-info.mjs mcp",
+    "version": "node scripts/sync-version.mjs && git add mcp/package.json extension/manifest.json",
     "check": "npm run build",
     "setup:markdown": "node scripts/setup-markdown.mjs",
     "cli": "node mcp/dist/cli.js",

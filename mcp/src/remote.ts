@@ -8,6 +8,7 @@ import { ExtensionBridge } from "./websocket.js";
 import { ensureDaemon } from "./lifecycle.js";
 import { checkBatchLogin, parseRemoteCommand, REMOTE_USAGE } from "./ssh-tunnel.js";
 import { readRemoteSettings, writeRemoteSettings, type TunnelStatus } from "./tunnel-supervisor.js";
+import { latestBuilds, RUNNING_BUILD, versionWarnings } from "./build-info.js";
 
 const HELP = `${REMOTE_USAGE}
 Run on the browser host.
@@ -46,7 +47,10 @@ async function main(): Promise<void> {
       const status = await daemonStatus(bridge);
       console.log(`设置：${settings.enabled ? "开启" : "关闭"}${settings.destination ? `，目标 ${settings.destination}` : ""}`);
       console.log(`状态：${status ? describe(status.tunnel) : "daemon 未运行"}`);
-      if (status) console.log(`Chrome 扩展：${status.extensionConnected ? "已连接" : "未连接，请打开扩展 Bridge 页面"}`);
+      if (status) {
+        console.log(`Chrome 扩展：${status.extensionConnected ? "已连接" : "未连接，请打开扩展 Bridge 页面"}`);
+        for (const warning of versionWarnings(status.versions, RUNNING_BUILD, latestBuilds().mcp, "local", status.extensionConnected)) console.log(`注意：${warning}`);
+      }
       return;
     }
 
