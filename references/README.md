@@ -39,7 +39,7 @@
 | 2026-11-13 浏览器快照 token 实测 | [Braiser、Playwright MCP、Chrome DevTools MCP 对比](browser-snapshot-tokens-2026-11-13.md) | — |
 | Claude 的浏览器操作 | [Claude in Chrome、browser use tool、computer use](Claude-browser-tools.md) | — |
 | Codex 与 OpenAI 的浏览器操作 | [Codex 应用、CLI 与 API 工具](Codex-browser-tools.md) | — |
-| Playwright MCP | [快照格式、省 token 尝试与他人报告](Playwright-MCP.md) | — |
+| Playwright MCP | [快照格式、生成逻辑、省 token 尝试与他人报告](Playwright-MCP.md) | [作者的看法](Playwright-MCP-thoughts.md) |
 | Chrome DevTools MCP | [快照格式与实测](Chrome-DevTools-MCP.md) | — |
 | agent-browser | [精简快照与 token 说法](agent-browser.md) | — |
 | browser-use | [页面表示方式](browser-use.md) | — |
